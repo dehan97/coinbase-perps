@@ -1,0 +1,10 @@
+/__pycache__/
+/backtest
+/data
+/logs
+cdp_api_key.json
+configuration.py
+test.ipynb
+data_processor.py
+trades.py
+signals_and_filters.py
