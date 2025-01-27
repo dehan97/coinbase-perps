@@ -5,6 +5,7 @@
 cdp_api_key.json
 configuration.py
 test.ipynb
-data_processor.py
 trades.py
 signals_and_filters.py
+trade_simulation.py
+main.bat

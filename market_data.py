@@ -51,6 +51,9 @@ def setup_logging():
 
 def download_market_data():
     """Main function to fetch, process, and store market data in partitioned Parquet format."""
+    global combined_df
+    combined_df = pd.DataFrame()  # Initialize an empty DataFrame
+
     setup_logging()
 
     client = RESTClient(
@@ -129,14 +132,14 @@ def download_market_data():
                         save_progress(product_id, end_unix)
                         break
                     else:
-                        raise ValueError("Empty response from API")
+                        raise ValueError(f"Empty response from API, {response=}")
                 except (requests.exceptions.RequestException, ValueError) as e:
                     retries += 1
                     logging.error(
                         f"Error fetching candles for {product_id}: {e}. "
                         f"Retry {retries}/{max_retries}"
                     )
-                    time.sleep(0.01)
+                    time.sleep(0.1)
 
             current_start = current_end
 
@@ -149,11 +152,10 @@ def download_market_data():
         }
 
     def process_and_save_candles(candles_data, product_id):
-        """Process fetched data, update combined_df, cache CSV, and prepare for final Parquet."""
-        global combined_df
+        """Process fetched data and save it as a CSV file."""
         if not candles_data:
             logging.warning(f"No data fetched for {product_id}. Skipping.")
-            return
+            return None
 
         columns = ["start", "low", "high", "open", "close", "volume"]
         candles_data = [candle_to_dict(x) for x in candles_data]
@@ -164,12 +166,11 @@ def download_market_data():
             df[col] = df[col].astype(float)
         df["symbol"] = product_id
 
-        combined_df = pd.concat([combined_df, df], ignore_index=True)
-        logging.info(f"Processed candles for {product_id}.")
-
         raw_cache_file = f"data/raw_cache/{product_id}_candles.csv"
         df.to_csv(raw_cache_file, index=False)
         logging.info(f"Saved candle data for {product_id} to {raw_cache_file}")
+
+        return df
 
     def download_candles_for_products(product_ids, start_date_range, end_date_range):
         """Fetch and process data for multiple products (multithreading)."""
@@ -178,13 +179,16 @@ def download_market_data():
         end_datetime = datetime.strptime(end_date_range, date_format)
 
         print(f"Starting download for {len(product_ids)} products.")
+        all_data = []  # List to collect DataFrames from all threads
 
         def worker(product_id):
             try:
                 candles = fetch_candles_in_range(
                     start_datetime, end_datetime, product_id, "ONE_MINUTE"
                 )
-                process_and_save_candles(candles, product_id)
+                df = process_and_save_candles(candles, product_id)
+                if df is not None:
+                    all_data.append(df)  # Collect the processed DataFrame
             except Exception as e:
                 logging.error(f"Failed to process {product_id}: {e}")
 
@@ -199,17 +203,29 @@ def download_market_data():
                 )
             )
 
+        # Combine all data after multithreading completes
+        if all_data:
+            combined_df = pd.concat(all_data, ignore_index=True)
+            return combined_df
+        else:
+            logging.warning("No data fetched for any products.")
+            return pd.DataFrame()
+
     product_ids = [f"{x}-USDC" for x in Config().perp_tickers]
 
     start_date_range = Config().start_date_range
     end_date_range = Config().end_date_range
 
-    download_candles_for_products(product_ids, start_date_range, end_date_range)
+    combined_df = download_candles_for_products(
+        product_ids, start_date_range, end_date_range
+    )
 
-    combined_df.to_parquet(Config().raw_data_path, index=False)
-
-    logging.info(f"Saved all candles data to {Config().raw_data_path}.")
-    print(f"Data saved to {Config().raw_data_path}. Total rows: {len(combined_df)}")
+    if not combined_df.empty:
+        combined_df.to_parquet(Config().raw_data_path, index=False)
+        logging.info(f"Saved all candles data to {Config().raw_data_path}.")
+        print(f"Data saved to {Config().raw_data_path}. Total rows: {len(combined_df)}")
+    else:
+        logging.warning("No data to save to Parquet.")
 
 
 if __name__ == "__main__":
