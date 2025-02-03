@@ -2,10 +2,14 @@
 /backtest
 /data
 /logs
+/results
 cdp_api_key.json
 configuration.py
 test.ipynb
 trades.py
 signals_and_filters.py
 trade_simulation.py
+backtest_simulation.py
 main.bat
+
+
