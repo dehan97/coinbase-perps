@@ -46,7 +46,9 @@ def save_strategy_mapping():
 def max_dd(returns):
     """Assumes returns is a pandas Series"""
     returns = returns.astype(np.float64)  # Ensure high precision
-    log_r = np.log1p(returns)  # Use log-transformed cumulative returns
+    returns = returns.replace([np.inf, -np.inf], np.nan).fillna(0)
+    returns = np.clip(returns, -0.99, 1e6)  # Ensure valid range for log1p
+    log_r = np.log1p(returns)
     log_cumsum = log_r.cumsum()
     log_cumsum = np.clip(log_cumsum, -700, 50)  # Prevents extreme values
     r = np.exp(log_cumsum)
@@ -130,11 +132,23 @@ def calculate_strategy_metrics(trades_file: str):
                 if not downside_returns.empty and downside_returns.std() != 0
                 else 0.0
             )
-            log_sum = np.log1p(subset_returns).sum()
-            log_sum = np.clip(log_sum, -700, 700)  # ✅ Prevents overflow
 
-            log_sum = np.clip(log_sum, -700, 50)  # Ensure safe exponentiation
-            total_return = np.exp(log_sum) - 1
+            # 1️⃣ Replace infinities with NaN, then fill NaNs with 0
+            subset_returns = subset_returns.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+            # 2️⃣ Clip extreme values to prevent log1p issues
+            subset_returns = np.clip(
+                subset_returns, -0.99, 1e6
+            )  # ✅ Ensures valid log1p range
+
+            # 3️⃣ Apply log1p safely
+            log_sum = np.log1p(subset_returns).sum()
+
+            # 4️⃣ Prevent extreme log_sum values before exponentiation
+            log_sum = np.clip(log_sum, -700, 50)  # ✅ Avoids np.exp() overflow
+
+            # 5️⃣ Use numerically stable exponentiation
+            total_return = np.expm1(log_sum)  # ✅ Handles small values more accurately
 
             annualized_return = (
                 (1 + total_return) ** (annual_factor / num_days) - 1
