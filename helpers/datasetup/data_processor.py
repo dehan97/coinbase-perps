@@ -1,8 +1,9 @@
 import logging
 import os
 import pandas as pd
-from configuration import Config
+from config.configuration import Config
 from tqdm import tqdm
+from functools import lru_cache
 
 # Configure logging
 logging.basicConfig(
@@ -90,6 +91,19 @@ class MarketDataProcessor:
         logging.info(f"Saved resampled data to {resampled_path}.")
 
         return resampled.reset_index()
+
+
+@lru_cache(maxsize=None)
+def load_data_for_timeframe(timeframe: str) -> pd.DataFrame:
+    """
+    Load & cache the DataFrame for a given timeframe.
+    Uses a parquet file based on the timeframe string.
+    """
+    path = f"{Config().resampled_path}/resampled_{timeframe}.parquet"
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No resampled data found for timeframe: {timeframe}")
+    df = pd.read_parquet(path)
+    return df
 
 
 if __name__ == "__main__":

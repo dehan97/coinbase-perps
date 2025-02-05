@@ -22,7 +22,7 @@ import time
 import logging
 import requests
 from tqdm import tqdm
-from configuration import Config
+from config.configuration import Config
 from coinbase.rest import RESTClient
 import concurrent.futures
 

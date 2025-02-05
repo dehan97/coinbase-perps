@@ -1,11 +1,11 @@
-/__pycache__/
-/backtest
+__pycache__/
+*.pyc
+*.pyo
 /data
 /logs
 /results
 cdp_api_key.json
 configuration.py
+populate_data.py
 test.ipynb
 main.bat
-
-

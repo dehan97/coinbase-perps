@@ -5,10 +5,17 @@ import json
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
-from configuration import Config
-import signals_and_filters
-from signals_and_filters import SignalCache, generate_signals, load_data_for_timeframe
-from trade_simulation import TradeCache, calculate_trade_outcomes, fill_trades_cache
+from config.configuration import Config
+from helpers.trademgmt.signals_and_filters import (
+    SignalCache,
+    generate_signals,
+    load_data_for_timeframe,
+)
+from helpers.trademgmt.trade_simulation import (
+    TradeCache,
+    calculate_trade_outcomes,
+    fill_trades_cache,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -358,9 +365,9 @@ def run_backtest():
 
                 # Merge with price data to get back all rows.
                 signals = signals[["symbol", "start", "signal"]].merge(
-                    signals_and_filters.load_data_for_timeframe(
-                        timeframe
-                    ).reset_index()[["symbol", "start", "close", "returns", "volume"]],
+                    load_data_for_timeframe(timeframe).reset_index()[
+                        ["symbol", "start", "close", "returns", "volume"]
+                    ],
                     how="right",
                     on=["symbol", "start"],
                 )

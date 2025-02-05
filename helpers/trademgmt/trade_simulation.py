@@ -2,8 +2,8 @@ import logging
 import os
 import pandas as pd
 import numpy as np
-from configuration import Config
-from signals_and_filters import (
+from config.configuration import Config
+from helpers.trademgmt.signals_and_filters import (
     load_data_for_timeframe,
     generate_signals,
     SignalCache,
