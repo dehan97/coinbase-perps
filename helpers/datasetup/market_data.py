@@ -57,7 +57,7 @@ def download_market_data():
     setup_logging()
 
     client = RESTClient(
-        api_key=Config().name, api_secret=Config().private_key, timeout=5
+        api_key=Config().name, api_secret=Config().private_key, timeout=60
     )
 
     max_time_span = Config().max_time_span

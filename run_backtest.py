@@ -429,33 +429,33 @@ def run_backtest():
 
 
 if __name__ == "__main__":
-    # RUN CACHE FILL
-    # Initialize caches
-    trade_cache = TradeCache()
-    signal_cache = SignalCache()
+    # # RUN CACHE FILL
+    # # Initialize caches
+    # trade_cache = TradeCache()
+    # signal_cache = SignalCache()
 
-    # Define parameter ranges
-    holding_periods = Config().holding_periods
-    tp_sl_values = Config().tp_sl_values
-    zscore_lookback_values = Config().zscore_lookback_values
+    # # Define parameter ranges
+    # holding_periods = Config().holding_periods
+    # tp_sl_values = Config().tp_sl_values
+    # zscore_lookback_values = Config().zscore_lookback_values
 
-    for timeframe in Config().time_intervals:
-        # Load market data
-        df_prices = load_data_for_timeframe(timeframe).reset_index()[
-            ["symbol", "start", "close", "returns"]
-        ]
+    # for timeframe in Config().time_intervals:
+    #     # Load market data
+    #     df_prices = load_data_for_timeframe(timeframe).reset_index()[
+    #         ["symbol", "start", "close", "returns"]
+    #     ]
 
-        # Precompute & store all trade results
-        fill_trades_cache(
-            df=df_prices,
-            timeframe=timeframe,
-            holding_periods=holding_periods,
-            tp_sl_values=tp_sl_values,
-            zscore_lookback_values=zscore_lookback_values,
-            cache=trade_cache,
-        )
+    #     # Precompute & store all trade results
+    #     fill_trades_cache(
+    #         df=df_prices,
+    #         timeframe=timeframe,
+    #         holding_periods=holding_periods,
+    #         tp_sl_values=tp_sl_values,
+    #         zscore_lookback_values=zscore_lookback_values,
+    #         cache=trade_cache,
+    #     )
 
-    print("Trade cache is now fully populated!")
+    # print("Trade cache is now fully populated!")
 
     # RUN BACKTESTING
     print("Starting backtesting process...")

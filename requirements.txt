@@ -1,0 +1,11 @@
+coinbase_advanced_py==1.8.2
+numpy==1.19.5
+numpy==1.24.3
+pandas==1.4.4
+pandas==2.0.3
+pandas==2.0.1
+Requests==2.32.3
+tqdm==4.66.4
+tqdm==4.66.5
+tqdm==4.67.1
+tqdm==4.66.2

@@ -5,7 +5,7 @@ from typing import Callable, Dict, Optional
 import inspect
 
 from config.configuration import Config
-from helpers.signals.TA import TechnicalIndicatorsMixin
+from helpers.signals.time_series import TimeSeriesForecastingMixin
 from helpers.datasetup.data_processor import load_data_for_timeframe
 
 ##############################################################################
@@ -307,7 +307,7 @@ class SignalCache:
 #         return df[["symbol", "start", "signal"]]
 
 
-class SignalCreator(TechnicalIndicatorsMixin):
+class SignalCreator(TimeSeriesForecastingMixin):
     """
     Contains static methods for creating signals. Inherits methods from mixin classes.
     This class is solely responsible for generating signals and does not handle caching.

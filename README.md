@@ -1,60 +1,49 @@
-# Crypto Market Data Pipeline
+# Cryptocurrency Backtesting Engine
 
-This repository contains a comprehensive pipeline for fetching, processing, and analyzing cryptocurrency market data. The project includes robust data handling, signal generation, trade simulation, and performance evaluation features.
+This repository contains a comprehensive **backtesting engine** for **cryptocurrency trading strategies**.
+It is designed to **test and optimize trading strategies** before deployment on **Coinbase Perpetual Futures**.
+The system **heavily relies on caching** using **Parquet files** to optimize data retrieval and storage.
 
-## Features
+---
 
-1. **Market Data Download**:
+## **🚀 Features**
 
-   - Fetch OHLCV data for cryptocurrency products from Coinbase API.
-   - Supports progress resumption and parallel processing.
-   - Saves data in partitioned Parquet and CSV formats.
-2. **Data Processing**:
+### **1. Market Data Handling**
 
-   - Resamples data to various time intervals (1 minute to 1 day).
-   - Computes returns and other derived features.
-3. **Signal Generation**:
+- Fetches **OHLCV** data for cryptocurrency markets using Coinbase API.
+- Supports **parallel processing** and **incremental downloads**.
+- Data is **partitioned and stored efficiently** in **Parquet format**.
 
-   - Creates trading signals based on momentum or custom strategies.
-   - Caches signals for efficient reuse.
-4. **Trade Simulation**:
+### **2. Data Processing & Resampling**
 
-   - Simulates trade outcomes using configurable parameters for take profit and stop loss.
-   - Caches results to reduce redundant calculations.
-5. **Performance Evaluation**:
+- Converts raw market data into **different timeframes** (1 min, 5 min, 1 hour, 1 day, etc.).
+- Computes **returns and volatility metrics**.
+- Uses **Dask & Pandas** for optimized data handling.
 
-   - Analyze trade performance with detailed metrics and logs.
+### **3. Signal Generation Using Time Series Forecasting**
 
-## Key Outputs
+- Implements **machine learning-based** signal generation.
+- Uses **Facebook Prophet** for time series forecasting.
+- Predicts future prices and generates **buy/sell signals** dynamically.
+- Supports **traditional technical indicators** like:
+  - Moving Averages (MA Crossover)
+  - Relative Strength Index (RSI)
+  - Bollinger Bands
+  - MACD
+  - Stochastic Oscillator
 
-- **Raw Data**: Partitioned OHLCV data in `data/raw_cache/`.
-- **Processed Data**: Resampled data stored in Parquet format.
-- **Signals**: Generated and cached trading signals in SQLite.
-- **Trades**: Simulated trade outcomes saved and logged.
+### **4. Trade Simulation & Execution**
 
-## Requirements
+- **Simulates trade outcomes** using backtested strategies.
+- Applies **configurable Take Profit (TP) & Stop Loss (SL)**.
+- Uses **z-score-based entry/exit conditions**.
+- Optimized **trade execution** with **precomputed caches**.
 
-- Python 3.8 or higher
-- Required libraries in `requirements.txt`
+### **5. Performance Evaluation**
 
-## How to Use
-
-1. Configure API keys and parameters in `configuration.py`.
-2. Run `market_data.py` to download market data.
-3. Process the data using `data_processor.py`.
-4. Generate signals using `signals_and_filters.py`.
-5. Simulate trades and evaluate performance with `trades.py`.
-
-## Folder Structure
-
-- **data/**: Contains raw and processed data.
-- **logs/**: Logs for debugging and monitoring.
-- **scripts/**: Core scripts for various stages of the pipeline.
-
-## Contributing
-
-Contributions are welcome! Please submit issues or pull requests for enhancements or bug fixes.
-
-## License
-
-This project is licensed under the MIT License.
+- Calculates **key trading metrics** including:
+  - Sharpe Ratio
+  - Sortino Ratio
+  - Maximum Drawdown (MDD)
+  - Profit Factor
+- Supports **custom strategy evaluation**.
