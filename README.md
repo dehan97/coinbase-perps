@@ -1,8 +1,8 @@
 # Cryptocurrency Backtesting Engine
 
 This repository contains a comprehensive **backtesting engine** for **cryptocurrency trading strategies**.
-It is designed to **test and optimize trading strategies** before deployment on **Coinbase Perpetual Futures**.
-The system **heavily relies on caching** using **Parquet files** to optimize data retrieval and storage.
+It is designed to conduct a **grid search over strategy parameters before deployment on **Coinbase Perpetual Futures**.
+The system **heavily relies on caching** using **Parquet files** to optimize data retrieval and storage.**
 
 ---
 

@@ -87,7 +87,7 @@ def calculate_strategy_metrics(trades_file: str):
 
     # Apply trade costs: 0.7% per trade (one-way)
     trade_costs = (
-        2 * Config().one_way_trade_costs * abs(trades["signal"])
+        2 * Config().one_way_trade_costs
     )  # Absolute trade size to account for both buy/sell trades
     trades["trade_return"] -= trade_costs  # Deducting cost from returns
 
@@ -104,6 +104,11 @@ def calculate_strategy_metrics(trades_file: str):
     # Calculate equal-weighted strategy daily returns (1/n allocation)
     daily_returns["ALL"] = daily_returns.mean(axis=1)
 
+    # Filter data to the last year for recent performance metrics
+    recent_returns = daily_returns[
+        daily_returns.index >= (pd.to_datetime("today") - pd.DateOffset(years=1))
+    ]
+
     def compute_metrics(returns, symbol):
         """Helper function to compute extensive strategy metrics."""
         num_days = len(returns)
@@ -112,10 +117,14 @@ def calculate_strategy_metrics(trades_file: str):
         # Categorize returns into positive, negative, and no return
         positive_returns = returns[returns > 0]
         negative_returns = returns[returns < 0]
-        zero_returns = returns[returns == 0]
 
         def aggregate_metrics(subset_returns, category):
-            """Computes all relevant metrics for a specific subset of trades (overall, positive, negative, zero)."""
+            """Computes all relevant metrics for a specific subset of trades (overall, positive, negative, recent)."""
+            if isinstance(
+                subset_returns, pd.DataFrame
+            ):  # If multiple columns exist, take the mean across columns
+                subset_returns = subset_returns.mean(axis=1)
+
             if subset_returns.empty:
                 return {
                     f"{category} Sharpe Ratio": None,
@@ -131,13 +140,13 @@ def calculate_strategy_metrics(trades_file: str):
                     f"{category} Expectancy": None,
                 }
 
-            std_dev = np.nan_to_num(
-                subset_returns.std(), nan=1e-10, posinf=1e10, neginf=-1e10
+            std_dev = subset_returns.std()
+            std_dev = float(
+                np.nan_to_num(std_dev, nan=1e-10, posinf=1e10, neginf=-1e10)
             )
 
-            # Avoid division by zero or NaN
-            if std_dev == 0 or np.isnan(std_dev):
-                sharpe_ratio = 0  # Set Sharpe Ratio to 0 if volatility is zero
+            if std_dev <= 1e-10:  # Avoid division by zero
+                sharpe_ratio = 0  # Set Sharpe Ratio to 0 if volatility is negligible
             else:
                 sharpe_ratio = subset_returns.mean() / std_dev * (annual_factor**0.5)
 
@@ -211,7 +220,7 @@ def calculate_strategy_metrics(trades_file: str):
         overall_metrics = aggregate_metrics(returns, "Overall")
         positive_metrics = aggregate_metrics(positive_returns, "Positive")
         negative_metrics = aggregate_metrics(negative_returns, "Negative")
-        zero_metrics = aggregate_metrics(zero_returns, "Zero")
+        recent_metrics = aggregate_metrics(recent_returns, "Recent")
 
         # Additional execution-based metrics
         num_trades = trades[trades["symbol"] == symbol]["signal"].ne(0).sum()
@@ -230,22 +239,32 @@ def calculate_strategy_metrics(trades_file: str):
         max_consec_losses = loss_streaks.max() if not loss_streaks.empty else 0
 
         return {
+            "Symbol": symbol,
             **overall_metrics,
             **positive_metrics,
             **negative_metrics,
-            **zero_metrics,
+            **recent_metrics,
             "Number of Trades": num_trades,
             "Turnover": turnover,
             "Exposure Time": exposure_time,
             "Max Consecutive Wins": max_consec_wins,
             "Max Consecutive Losses": max_consec_losses,
-            "Symbol": symbol,
         }
 
-    # Compute metrics per symbol (including 'ALL')
+    # Compute metrics for each symbol including 'ALL'
     symbol_metrics = []
     for symbol in daily_returns.columns:
+        # Compute overall metrics using the full data set
         metrics = compute_metrics(daily_returns[symbol], symbol)
+
+        # Compute recent metrics using the filtered data set from the last year
+        recent_metrics = compute_metrics(recent_returns[symbol], symbol)
+
+        # Merge overall and recent metrics
+        metrics.update(
+            recent_metrics
+        )  # Ensure recent metrics are properly labeled to distinguish them
+
         symbol_metrics.append(metrics)
 
     return pd.DataFrame(symbol_metrics)

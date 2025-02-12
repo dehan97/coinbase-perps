@@ -207,7 +207,7 @@ def fill_trades_cache(
                         pbar.update(1)
                         continue
 
-                    logging.info(f"Computing trades for {trade_params}")
+                    # logging.info(f"Computing trades for {trade_params}")
 
                     # Compute trade outcomes
                     trade_results = calculate_trade_outcomes(

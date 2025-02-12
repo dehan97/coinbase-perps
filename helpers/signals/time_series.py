@@ -10,6 +10,7 @@ from scipy.stats import boxcox
 from statsmodels.tsa.seasonal import seasonal_decompose
 from tqdm import tqdm
 import logging
+import concurrent.futures
 
 
 class TimeSeriesForecastingMixin:
@@ -56,25 +57,15 @@ class TimeSeriesForecastingMixin:
 
     @staticmethod
     def arima_forecast(timeframe: str, signal_params: dict) -> pd.DataFrame:
-        """
-        Generates buy/sell signals based on ARIMA forecast of returns, considering different holding periods.
-        """
-        p = signal_params.get("p", 2)
-        d = signal_params.get("d", 1)
-        q = signal_params.get("q", 2)
-        training_window = signal_params.get("training_window", 50)
-        retrain_frequency = signal_params.get("retrain_frequency", 10)
-        holding_period = signal_params.get("holding_period", 1)
-        apply_log = signal_params.get("apply_log", False)
-        apply_boxcox = signal_params.get("apply_boxcox", False)
-        apply_detrend = signal_params.get("apply_detrend", False)
-
         df = load_data_for_timeframe(timeframe).copy()
         df.sort_values(["symbol", "start"], inplace=True)
         df["signal"] = 0
         df["forecast"] = np.nan  # Initialize 'forecast' column
 
-        for symbol in tqdm(df.index.get_level_values("symbol").unique()):
+        symbols = df.index.get_level_values("symbol").unique()
+
+        # Function to handle ARIMA forecasting for a symbol
+        def process_symbol(symbol):
             symbol_data = df.xs(symbol, level="symbol").copy()
             symbol_data.index = pd.to_datetime(symbol_data.index)
             inferred_freq = TimeSeriesForecastingMixin._infer_frequency(
@@ -84,45 +75,65 @@ class TimeSeriesForecastingMixin:
                 symbol_data = symbol_data.asfreq(inferred_freq)
 
             # Apply transformations
-            transformed_data, original_data = (
-                TimeSeriesForecastingMixin._apply_transformations(
-                    symbol_data["returns"],
-                    apply_log,
-                    apply_boxcox,
-                    apply_detrend,
-                )
+            transformed_data, _ = TimeSeriesForecastingMixin._apply_transformations(
+                symbol_data["returns"],
+                signal_params.get("apply_log", False),
+                signal_params.get("apply_boxcox", False),
+                signal_params.get("apply_detrend", False),
             )
             symbol_data["returns"] = transformed_data
 
+            p, d, q = (
+                signal_params.get("p", 2),
+                signal_params.get("d", 1),
+                signal_params.get("q", 2),
+            )
+            training_window = signal_params.get("training_window", 50)
+            retrain_frequency = signal_params.get("retrain_frequency", 10)
+            holding_period = signal_params.get("holding_period", 1)
+
+            # Iterate over the data with the specified window and frequency
+            results = []
             for i in range(
-                training_window,
-                len(symbol_data) - holding_period,
-                retrain_frequency,
+                training_window, len(symbol_data) - holding_period, retrain_frequency
             ):
                 train_data = symbol_data["returns"].iloc[i - training_window : i]
                 try:
-                    model = ARIMA(train_data, order=(p, d, q))  # NOTE try SARIMA
+                    model = ARIMA(train_data, order=(p, d, q))
                     fitted_model = model.fit(method="statespace")
                     forecast = fitted_model.forecast(steps=holding_period)
-                    symbol_data.iloc[
-                        i + holding_period - 1, symbol_data.columns.get_loc("forecast")
-                    ] = forecast.values[-1]
+                    results.append((i, forecast.values[-1]))
                 except Exception as e:
-                    print(f"ARIMA error: {e}")
-                    continue
+                    print(f"ARIMA error for {symbol} at {i}: {e}")
 
-            symbol_data["signal"] = 0
-            symbol_data.loc[symbol_data["forecast"] > 0, "signal"] = 1
-            symbol_data.loc[symbol_data["forecast"] < 0, "signal"] = -1
+            # Assign forecasts and signals
+            for i, forecast in results:
+                symbol_data.at[
+                    symbol_data.index[i + holding_period - 1], "forecast"
+                ] = forecast
+                symbol_data.at[symbol_data.index[i + holding_period - 1], "signal"] = (
+                    1 if forecast > 0 else -1
+                )
 
-            print(f"{symbol_data['forecast'].value_counts()=}")
-            print(f"{symbol_data['signal'].value_counts()=}")
+            return symbol_data[["signal", "forecast"]]
 
-            df.loc[df.index.get_level_values("symbol") == symbol, "signal"] = (
-                symbol_data["signal"].values
-            )
+        # Use multiprocessing to handle each symbol
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            results = {
+                executor.submit(process_symbol, symbol): symbol for symbol in symbols
+            }
+            for future in concurrent.futures.as_completed(results):
+                symbol = results[future]
+                try:
+                    symbol_data = future.result()
+                    df.loc[
+                        df.index.get_level_values("symbol") == symbol,
+                        ["signal", "forecast"],
+                    ] = symbol_data
+                except Exception as exc:
+                    print(f"{symbol} generated an exception: {exc}")
 
-        return df.reset_index()[["symbol", "start", "signal"]]
+        return df.reset_index()[["symbol", "start", "signal", "forecast"]]
 
     @staticmethod
     def sarima_forecast(timeframe: str, signal_params: dict) -> pd.DataFrame:

@@ -78,9 +78,9 @@ class SignalCache:
     ) -> pd.DataFrame:
         """Retrieves or generates signals, storing them in a Parquet cache."""
         if self.signals_exist(timeframe, method_name, signal_params):
-            logging.info(
-                # f"Loading cached signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
-            )
+            # logging.info(
+            # f"Loading cached signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
+            # )
             return self.load_signals(timeframe, method_name, signal_params)
         else:
             # logging.info(
@@ -116,9 +116,9 @@ class SignalCache:
             )
             return pd.read_parquet(file_path)
 
-        logging.info(
-            f"Computing filtered signals for {method_name} with filter {filter_name} ({filter_params})"
-        )
+        # logging.info(
+        #     f"Computing filtered signals for {method_name} with filter {filter_name} ({filter_params})"
+        # )
         df_signals = self.get_or_create_signals(
             timeframe, method_name, signal_params, lambda tf, sp: None
         )
@@ -284,18 +284,21 @@ class FilterCreator:
         rs = gain / (loss + 1e-9)  # Avoid division by zero
         df["rsi"] = 100 - (100 / (1 + rs))
 
-        # Ensure there are enough unique values to form 5 buckets
+        # Compute the number of unique RSI values
         num_unique = df["rsi"].nunique()
-        if num_unique < 5:
-            print(
-                f"Warning: Only {num_unique} unique RSI values, reducing bucket count."
-            )
-            num_bins = max(2, num_unique)  # Ensure at least 2 bins
-            df["rsi_bucket"] = pd.qcut(
-                df["rsi"], num_bins, labels=range(1, num_bins + 1), duplicates="drop"
-            )
-        else:
-            df["rsi_bucket"] = pd.qcut(df["rsi"], 5, labels=[1, 2, 3, 4, 5])
+
+        # Ensure we have at least 2 bins, but at most 5 bins
+        num_bins = min(5, max(2, num_unique))
+
+        # Adjust the number of labels dynamically to match num_bins - 1
+        df["rsi_bucket"] = pd.qcut(
+            df["rsi"],
+            num_bins,
+            labels=range(
+                1, num_bins
+            ),  # This ensures labels are one fewer than bin edges
+            duplicates="drop",
+        )
 
         # Convert to categorical before handling NaNs
         df["rsi_bucket"] = df["rsi_bucket"].astype("category")
