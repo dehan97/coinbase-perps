@@ -35,8 +35,8 @@ class MarketDataProcessor:
         self.data = pd.read_parquet(self.raw_data_path)
         logging.info(f"Loaded raw data with shape {self.data.shape}")
 
-        # print("Initial Raw Data:")
-        # print(self.data.head())
+        print("Initial Raw Data:")
+        print(self.data.head())
 
         required_columns = {"start", "symbol", "close", "open", "high", "low", "volume"}
         missing_cols = required_columns - set(self.data.columns)
@@ -51,9 +51,9 @@ class MarketDataProcessor:
         self.data.set_index("start", inplace=True)
         logging.info("Set 'start' column as index.")
 
-        # # Check for missing values in raw data
-        # print("Missing Values Before Processing:")
-        # print(self.data.isna().sum())
+        # Check for missing values in raw data
+        print("Missing Values Before Processing:")
+        print(self.data.isna().sum())
 
     def compute_returns(self):
         logging.info("Computing returns for each symbol in raw data.")
@@ -109,8 +109,8 @@ class MarketDataProcessor:
             )
         )
 
-        # print("Resampled Data Before Computing Returns (First 10 rows):")
-        # print(resampled.head(10))
+        print("Resampled Data Before Computing Returns (First 10 rows):")
+        print(resampled.head(10))
         logging.info(f"Resampled data shape: {resampled.shape}")
 
         if resampled.empty:
@@ -122,11 +122,14 @@ class MarketDataProcessor:
         logging.info("Computing returns before merging missing timestamps.")
         resampled["returns"] = resampled.groupby("symbol")["close"].pct_change()
 
-        # print("Resampled Data After Computing Returns (First 10 rows):")
-        # print(resampled.head(10))
+        print("Resampled Data After Computing Returns (First 10 rows):")
+        print(resampled.head(10))
 
         # Compute expected full range of timestamps
-        start_time, end_time = self.data.index.min(), self.data.index.max()
+        start_time, end_time = (
+            resampled.reset_index()["start"].min(),
+            resampled.reset_index()["start"].max(),
+        )
         full_time_range = pd.date_range(start=start_time, end=end_time, freq=freq)
 
         unique_symbols = self.data["symbol"].unique()
@@ -143,15 +146,13 @@ class MarketDataProcessor:
         # Set index back
         resampled.set_index(["start", "symbol"], inplace=True)
 
-        # print("Resampled Data After Merging Missing Timestamps (First 10 rows):")
-        # print(resampled.head(10))
+        print("Resampled Data After Merging Missing Timestamps (First 10 rows):")
+        print(resampled.head(10))
         logging.info(f"Data after merging missing timestamps shape: {resampled.shape}")
 
         # **🔹 Forward-Fill, Backward-Fill, and Fill NaN**
-        resampled["volume"].fillna(0, inplace=True)
-        resampled = (
-            resampled.groupby("symbol").fillna(method="ffill").fillna(method="bfill")
-        )
+        resampled["volume"] = resampled["volume"].fillna(0)
+        resampled = resampled.groupby("symbol").apply(lambda g: g.ffill().bfill())
 
         print("Missing Values After Fill:")
         print(resampled.isna().sum())
@@ -160,8 +161,8 @@ class MarketDataProcessor:
         resampled.to_parquet(resampled_path, partition_cols=["symbol"])
         logging.info(f"Saved resampled data to {resampled_path}.")
 
-        # print("Final Resampled Data Sample:")
-        # print(resampled.head(10))
+        print("Final Resampled Data Sample:")
+        print(resampled.head(10))
 
         return resampled.reset_index()
 

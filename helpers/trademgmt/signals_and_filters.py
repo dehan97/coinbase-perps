@@ -79,13 +79,13 @@ class SignalCache:
         """Retrieves or generates signals, storing them in a Parquet cache."""
         if self.signals_exist(timeframe, method_name, signal_params):
             logging.info(
-                f"Loading cached signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
+                # f"Loading cached signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
             )
             return self.load_signals(timeframe, method_name, signal_params)
         else:
-            logging.info(
-                f"Computing signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
-            )
+            # logging.info(
+            #     f"Computing signals for method '{method_name}' with params {signal_params} and timeframe '{timeframe}'."
+            # )
             df = signal_func(timeframe, signal_params)
             self.save_signals(timeframe, method_name, signal_params, df)
             return df
@@ -137,174 +137,6 @@ class SignalCache:
 ##############################################################################
 #                          2) SIGNAL CREATOR CLASS                            #
 ##############################################################################
-
-
-# class TechnicalIndicatorsMixin:
-#     """
-#     Contains static methods for creating signals. Inherits methods from mixin classes.
-#     This class is solely responsible for generating signals and does not handle caching.
-#     """
-
-#     @staticmethod
-#     def moving_average_crossover(timeframe: str, signal_params: dict) -> pd.DataFrame:
-#         """
-#         Generates buy/sell signals based on moving average crossovers.
-#         """
-#         short_window = signal_params.get("short_window", 10)
-#         long_window = signal_params.get("long_window", 50)
-
-#         df = load_data_for_timeframe(timeframe).copy()
-#         df.sort_values(["symbol", "start"], inplace=True)
-#         df.reset_index(inplace=True)
-
-#         df["short_ma"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.rolling(window=short_window, min_periods=1).mean()
-#         )
-#         df["long_ma"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.rolling(window=long_window, min_periods=1).mean()
-#         )
-
-#         df["signal"] = 0
-#         df.loc[df["short_ma"] > df["long_ma"], "signal"] = 1
-#         df.loc[df["short_ma"] < df["long_ma"], "signal"] = -1
-
-#         return df[["symbol", "start", "signal"]]
-
-#     @staticmethod
-#     def rsi_strategy(timeframe: str, signal_params: dict) -> pd.DataFrame:
-#         """
-#         Generates buy/sell signals based on the Relative Strength Index (RSI).
-#         A buy signal (1) occurs when RSI crosses below the oversold threshold (e.g., 30).
-#         A sell signal (-1) occurs when RSI crosses above the overbought threshold (e.g., 70).
-#         """
-#         period = signal_params.get("rsi_period", 14)
-#         overbought = signal_params.get("overbought", 70)
-#         oversold = signal_params.get("oversold", 30)
-
-#         df = load_data_for_timeframe(timeframe).copy()
-#         df.sort_values(["symbol", "start"], inplace=True)
-#         df.reset_index(inplace=True)
-
-#         df["delta"] = df.groupby("symbol", observed=False)["close"].diff()
-#         df["gain"] = df["delta"].apply(lambda x: x if x > 0 else 0)
-#         df["loss"] = df["delta"].apply(lambda x: -x if x < 0 else 0)
-
-#         df["avg_gain"] = df.groupby("symbol", observed=False)["gain"].transform(
-#             lambda x: x.rolling(window=period, min_periods=1).mean()
-#         )
-#         df["avg_loss"] = df.groupby("symbol", observed=False)["loss"].transform(
-#             lambda x: x.rolling(window=period, min_periods=1).mean()
-#         )
-
-#         df["rs"] = df["avg_gain"] / df["avg_loss"]
-#         df["rsi"] = 100 - (100 / (1 + df["rs"]))
-
-#         df["signal"] = 0
-#         df.loc[df["rsi"] < oversold, "signal"] = 1  # Buy
-#         df.loc[df["rsi"] > overbought, "signal"] = -1  # Sell
-
-#         return df[["symbol", "start", "signal"]]
-
-#     @staticmethod
-#     def bollinger_bands_strategy(timeframe: str, signal_params: dict) -> pd.DataFrame:
-#         """
-#         Generates buy/sell signals based on Bollinger Bands.
-#         A buy signal (1) occurs when the price crosses below the lower band.
-#         A sell signal (-1) occurs when the price crosses above the upper band.
-#         """
-#         period = signal_params.get("bb_period", 20)
-#         std_dev = signal_params.get("std_dev", 2)
-
-#         df = load_data_for_timeframe(timeframe).copy()
-#         df.sort_values(["symbol", "start"], inplace=True)
-#         df.reset_index(inplace=True)
-
-#         df["rolling_mean"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.rolling(window=period, min_periods=1).mean()
-#         )
-#         df["rolling_std"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.rolling(window=period, min_periods=1).std()
-#         )
-
-#         df["upper_band"] = df["rolling_mean"] + (df["rolling_std"] * std_dev)
-#         df["lower_band"] = df["rolling_mean"] - (df["rolling_std"] * std_dev)
-
-#         df["signal"] = 0
-#         df.loc[df["close"] < df["lower_band"], "signal"] = 1  # Buy
-#         df.loc[df["close"] > df["upper_band"], "signal"] = -1  # Sell
-
-#         return df[["symbol", "start", "signal"]]
-
-#     @staticmethod
-#     def macd_strategy(timeframe: str, signal_params: dict) -> pd.DataFrame:
-#         """
-#         Generates buy/sell signals based on the Moving Average Convergence Divergence (MACD).
-#         A buy signal (1) occurs when the MACD line crosses above the signal line.
-#         A sell signal (-1) occurs when the MACD line crosses below the signal line.
-#         """
-#         short_period = signal_params.get("short_period", 12)
-#         long_period = signal_params.get("long_period", 26)
-#         signal_period = signal_params.get("signal_period", 9)
-
-#         df = load_data_for_timeframe(timeframe).copy()
-#         df.sort_values(["symbol", "start"], inplace=True)
-#         df.reset_index(inplace=True)
-
-#         df["ema_short"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.ewm(span=short_period, adjust=False).mean()
-#         )
-#         df["ema_long"] = df.groupby("symbol", observed=False)["close"].transform(
-#             lambda x: x.ewm(span=long_period, adjust=False).mean()
-#         )
-
-#         df["macd"] = df["ema_short"] - df["ema_long"]
-#         df["macd_signal"] = df.groupby("symbol", observed=False)["macd"].transform(
-#             lambda x: x.ewm(span=signal_period, adjust=False).mean()
-#         )
-
-#         df["signal"] = 0
-#         df.loc[df["macd"] > df["macd_signal"], "signal"] = 1  # Buy
-#         df.loc[df["macd"] < df["macd_signal"], "signal"] = -1  # Sell
-
-#         return df[["symbol", "start", "signal"]]
-
-#     @staticmethod
-#     def stochastic_oscillator_strategy(
-#         timeframe: str, signal_params: dict
-#     ) -> pd.DataFrame:
-#         """
-#         Generates buy/sell signals based on the Stochastic Oscillator.
-#         A buy signal (1) occurs when %K crosses above %D below the oversold threshold.
-#         A sell signal (-1) occurs when %K crosses below %D above the overbought threshold.
-#         """
-#         k_period = signal_params.get("k_period", 14)
-#         d_period = signal_params.get("d_period", 3)
-#         overbought = signal_params.get("overbought", 80)
-#         oversold = signal_params.get("oversold", 20)
-
-#         df = load_data_for_timeframe(timeframe).copy()
-#         df.sort_values(["symbol", "start"], inplace=True)
-#         df.reset_index(inplace=True)
-
-#         df["low_min"] = df.groupby("symbol", observed=False)["low"].transform(
-#             lambda x: x.rolling(window=k_period, min_periods=1).min()
-#         )
-#         df["high_max"] = df.groupby("symbol", observed=False)["high"].transform(
-#             lambda x: x.rolling(window=k_period, min_periods=1).max()
-#         )
-
-#         df["%K"] = (
-#             100 * (df["close"] - df["low_min"]) / (df["high_max"] - df["low_min"])
-#         )
-#         df["%D"] = df.groupby("symbol", observed=False)["%K"].transform(
-#             lambda x: x.rolling(window=d_period, min_periods=1).mean()
-#         )
-
-#         df["signal"] = 0
-#         df.loc[(df["%K"] > df["%D"]) & (df["%K"] < oversold), "signal"] = 1  # Buy
-#         df.loc[(df["%K"] < df["%D"]) & (df["%K"] > overbought), "signal"] = -1  # Sell
-
-#         return df[["symbol", "start", "signal"]]
 
 
 class SignalCreator(TimeSeriesForecastingMixin):
@@ -398,30 +230,89 @@ class FilterCreator:
         filter_func = self.filter_mapping[filter_name]
         return filter_func(self.df, filter_params, timeframe)
 
+    # @staticmethod
+    # def custom_volume_filter(
+    #     df: pd.DataFrame, filter_params: dict, timeframe: str
+    # ) -> pd.DataFrame:
+    #     """
+    #     Removes signals where volume is below a specified threshold.
+    #     """
+    #     df["start"] = pd.to_datetime(df["start"])
+    #     pv_data = load_data_for_timeframe(timeframe).reset_index()
+    #     pv_data["start"] = pd.to_datetime(pv_data["start"])
+
+    #     print(f"Merging filtered data with price-volume data for timeframe {timeframe}")
+    #     df = pd.merge(
+    #         df,
+    #         pv_data,
+    #         how="left",
+    #         on=["symbol", "start"],
+    #     )
+
+    #     threshold = filter_params.get("volume_threshold", 10000)
+    #     condition = (df["signal"] == 1) & (df["volume"] < threshold)
+    #     df.loc[condition, "signal"] = 0
+
+    #     print(f"Applied custom volume filter: {df['signal'].value_counts()}")
+    #     return df
+
     @staticmethod
-    def custom_volume_filter(
+    def rolling_rsi_filter(
         df: pd.DataFrame, filter_params: dict, timeframe: str
     ) -> pd.DataFrame:
         """
-        Removes signals where volume is below a specified threshold.
+        Filters signals based on rolling RSI, categorized into 5 buckets.
         """
-        df["start"] = pd.to_datetime(df["start"])
+        period = filter_params.get("rsi_period", 14)
+        bucket_selection = filter_params.get(
+            "rsi_buckets", [1, 2, 3, 4, 5]
+        )  # Default: All buckets
+
+        # Load price-volume data for the given timeframe
         pv_data = load_data_for_timeframe(timeframe).reset_index()
         pv_data["start"] = pd.to_datetime(pv_data["start"])
 
         print(f"Merging filtered data with price-volume data for timeframe {timeframe}")
-        df = pd.merge(
-            df,
-            pv_data,
-            how="left",
-            on=["symbol", "start"],
+        df = pd.merge(df, pv_data, how="left", on=["symbol", "start"])
+
+        print(f"{df.columns=}")
+
+        # Compute RSI
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=1).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=1).mean()
+        rs = gain / (loss + 1e-9)  # Avoid division by zero
+        df["rsi"] = 100 - (100 / (1 + rs))
+
+        # Ensure there are enough unique values to form 5 buckets
+        num_unique = df["rsi"].nunique()
+        if num_unique < 5:
+            print(
+                f"Warning: Only {num_unique} unique RSI values, reducing bucket count."
+            )
+            num_bins = max(2, num_unique)  # Ensure at least 2 bins
+            df["rsi_bucket"] = pd.qcut(
+                df["rsi"], num_bins, labels=range(1, num_bins + 1), duplicates="drop"
+            )
+        else:
+            df["rsi_bucket"] = pd.qcut(df["rsi"], 5, labels=[1, 2, 3, 4, 5])
+
+        # Convert to categorical before handling NaNs
+        df["rsi_bucket"] = df["rsi_bucket"].astype("category")
+
+        # Only add category 3 if it isn't already present
+        if 3 not in df["rsi_bucket"].cat.categories:
+            df["rsi_bucket"] = df["rsi_bucket"].cat.add_categories([3])
+
+        # Fill NaNs before converting to int
+        df["rsi_bucket"] = df["rsi_bucket"].fillna(3).astype(int)
+
+        # Filter signals based on selected buckets
+        df.loc[~df["rsi_bucket"].isin(bucket_selection), "signal"] = 0
+
+        print(
+            f"Applied rolling RSI filter with buckets {bucket_selection}: {df['signal'].value_counts()}"
         )
-
-        threshold = filter_params.get("volume_threshold", 10000)
-        condition = (df["signal"] == 1) & (df["volume"] < threshold)
-        df.loc[condition, "signal"] = 0
-
-        print(f"Applied custom volume filter: {df['signal'].value_counts()}")
         return df
 
 

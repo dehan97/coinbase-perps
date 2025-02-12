@@ -2,9 +2,11 @@ import logging
 import itertools
 import os
 import json
+import sys
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
+import random
 from config.configuration import Config
 from helpers.trademgmt.signals_and_filters import (
     SignalCache,
@@ -17,12 +19,19 @@ from helpers.trademgmt.trade_simulation import (
     fill_trades_cache,
 )
 
-# Setup logging
-logging.basicConfig(
-    filename=f"{Config().logs_path}/backtest.log",
-    level=logging.INFO,
-    format=Config().logging_format,
-)
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# # Setup logging
+# logging.basicConfig(
+#     filename=f"{Config().logs_path}/backtest.log",
+#     level=logging.INFO,
+#     format=Config().logging_format,
+# )
+# logging.getLogger("cmdstanpy").disabled = True
+# print(f"Logging Path: {Config().logs_path}")
+
 
 # Configuration for backtesting
 timeframes = Config().time_intervals
@@ -31,7 +40,6 @@ filter_methods = Config().filter_methods
 holding_periods = Config().holding_periods
 tp_sl_values = Config().tp_sl_values
 zscore_lookback_values = Config().zscore_lookback_values
-use_absolute_returns_options = Config().use_absolute_returns_options
 
 # Strategy mapping file
 strategy_mapping_file = f"{Config().results_path}/strategy_mapping.json"
@@ -247,6 +255,10 @@ def save_strategy_metrics(
     strategy_dir: str, strategy_config: dict, metrics_df: pd.DataFrame
 ):
     """Saves strategy metrics and configuration to a Parquet file."""
+    if metrics_df is None:
+        # logging.info(f"No metrics to save for directory: {strategy_dir}")
+        return  # Exit the function if there are no metrics to save
+
     metrics_file = f"{strategy_dir}/metrics.parquet"
 
     # Extract signal and filter parameters into separate columns
@@ -289,9 +301,10 @@ def run_backtest():
                 holding_periods,
                 tp_sl_values,
                 zscore_lookback_values,
-                use_absolute_returns_options,
             )
         )
+
+        random.shuffle(total_combinations)
 
         # Iterate over all combinations with progress bar
         for combination in tqdm(
@@ -304,7 +317,6 @@ def run_backtest():
                 holding_period,
                 tp_sl,
                 zscore_lookback,
-                use_absolute_returns,
             ) = combination
 
             for signal_params in signal_methods[signal_method]:
@@ -319,7 +331,6 @@ def run_backtest():
                     "holding_period": holding_period,
                     "tp_sl": tp_sl,
                     "zscore_lookback": zscore_lookback,
-                    "use_absolute_returns": use_absolute_returns,
                 }
 
                 # Define strategy directory and file paths
@@ -329,7 +340,7 @@ def run_backtest():
 
                 # Skip processing if results already exist
                 if os.path.exists(trades_file):
-                    logging.info(f"Skipping {strategy_label}, results already exist.")
+                    # logging.info(f"Skipping {strategy_label}, results already exist.")
                     print(f"Skipping {strategy_label}, results already exist.")
 
                     # Compute and save metrics if not already done
@@ -343,7 +354,7 @@ def run_backtest():
                     strategy_id += 1
                     continue
 
-                logging.info(f"Starting {strategy_label}: {strategy_config}")
+                # logging.info(f"Starting {strategy_label}: {strategy_config}")
                 print(f"Processing {strategy_label}: {strategy_config}")
 
                 # Generate signals
@@ -355,7 +366,7 @@ def run_backtest():
                     filter_params=filter_params,
                     cache=signal_cache,
                 )
-                logging.info(f"{strategy_label}: Generated {len(signals)} signals.")
+                # logging.info(f"{strategy_label}: Generated {len(signals)} signals.")
                 print(f"{strategy_label}: {len(signals)} signals generated.")
                 # print(signals["signal"].value_counts()) #signals contains the actionable signals only.
 
@@ -387,18 +398,17 @@ def run_backtest():
                     holding_period=holding_period,
                     tp_sl=tp_sl,
                     zscore_lookback=zscore_lookback,
-                    use_absolute_returns=use_absolute_returns,
                     cache=trade_cache,
                     timeframe=timeframe,
                 )
 
-                logging.info(
-                    f"{strategy_label}: Calculated outcomes for {len(trade_results)} trades."
-                )
+                # logging.info(
+                #     f"{strategy_label}: Calculated outcomes for {len(trade_results)} trades."
+                # )
                 print(
                     f"{strategy_label}: Outcomes calculated for {len(trade_results)} trades."
                 )
-                # print(f"{trade_results['signal'].value_counts()=}")
+                print(f"{trade_results['signal'].value_counts()=}")
 
                 # Create strategy directory
                 os.makedirs(strategy_dir, exist_ok=True)
@@ -408,7 +418,7 @@ def run_backtest():
                     trades_file, index=False
                 )
 
-                logging.info(f"{strategy_label}: Saved results to {trades_file}.")
+                # logging.info(f"{strategy_label}: Saved results to {trades_file}.")
                 print(f"Results for {strategy_label} saved to {trades_file}")
 
                 # Compute and save strategy metrics
@@ -424,7 +434,7 @@ def run_backtest():
     finally:
         # Close caches
         signal_cache.close()
-        logging.info("Caches closed. Backtesting completed.")
+        # logging.info("Caches closed. Backtesting completed.")
         print("Backtesting completed.")
 
 
@@ -459,7 +469,7 @@ if __name__ == "__main__":
 
     # RUN BACKTESTING
     print("Starting backtesting process...")
-    logging.info("Backtesting process initiated.")
+    # logging.info("Backtesting process initiated.")
     run_backtest()
     print("Backtesting process completed.")
-    logging.info("Backtesting process completed.")
+    # logging.info("Backtesting process completed.")

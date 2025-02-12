@@ -35,7 +35,6 @@ class TradeCache:
             "hp": trade_params["holding_period"],
             "tsl": trade_params["tp_sl"],
             "zl": trade_params["zscore_lookback"],
-            "uar": int(trade_params["use_absolute_returns"]),  # Convert to 0/1
         }
         param_str = "_".join(f"{k}-{v}" for k, v in sorted(param_abbrev.items()))
         filename = f"trades_{timeframe}_{param_str}.parquet"
@@ -69,11 +68,9 @@ def calculate_trade_outcomes(
     zscore_lookback: int,  # Lookback window for z-score calculation
     cache: TradeCache,
     timeframe: str,
-    use_absolute_returns: bool = False,
 ) -> pd.DataFrame:
     """
     Computes trade outcomes using z-score based TP/SL exit conditions.
-    TP/SL decision is based on either raw returns or absolute returns.
 
     Args:
         df (pd.DataFrame): Input dataframe with 'symbol', 'start', 'close'.
@@ -82,7 +79,6 @@ def calculate_trade_outcomes(
         zscore_lookback (int): Lookback window for z-score calculation.
         cache (TradeCache): Cache manager to store/retrieve trade results.
         timeframe (str): The trading timeframe.
-        use_absolute_returns (bool): If True, TP/SL is based on absolute returns.
 
     Returns:
         pd.DataFrame: Processed trade results.
@@ -91,15 +87,11 @@ def calculate_trade_outcomes(
         "holding_period": holding_period,
         "tp_sl": tp_sl,
         "zscore_lookback": zscore_lookback,
-        "use_absolute_returns": use_absolute_returns,
     }
 
     def compute_trades():
         df_sorted = df.sort_values(["symbol", "start"]).reset_index(drop=True)
         df_sorted["start"] = pd.to_datetime(df_sorted["start"])
-
-        if use_absolute_returns:
-            df_sorted["returns"] = df_sorted["returns"].abs()
 
         df_sorted["returns_zscore"] = (
             df_sorted["returns"]
@@ -113,17 +105,40 @@ def calculate_trade_outcomes(
         df_sorted["future_close"] = df_sorted.groupby("symbol", observed=False)[
             "close"
         ].shift(-holding_period)
-        df_sorted["future_zscore"] = df_sorted.groupby("symbol", observed=False)[
-            "returns_zscore"
-        ].shift(-holding_period)
 
+        # Create shifted z-score for each step in the holding period
+        future_zscores = pd.concat(
+            [
+                df_sorted.groupby("symbol", observed=False)["returns_zscore"].shift(-i)
+                for i in range(1, holding_period + 1)
+            ],
+            axis=1,
+        )
+
+        # Check if TP or SL was hit in any step of the holding period
+        df_sorted["tp_hit"] = (future_zscores >= tp_sl).any(axis=1)
+        df_sorted["sl_hit"] = (future_zscores <= -tp_sl).any(axis=1)
+
+        # Find the first occurrence of TP or SL within the holding period
+        first_tp_index = future_zscores.ge(tp_sl).idxmax(axis=1)
+        first_sl_index = future_zscores.le(-tp_sl).idxmax(axis=1)
+
+        # Assign trade exit reason based on first event
         df_sorted["tp_sl_end_long"] = np.where(
-            df_sorted["future_zscore"] >= tp_sl,
+            df_sorted["tp_hit"] & ~df_sorted["sl_hit"],
             "take_profit",
             np.where(
-                df_sorted["future_zscore"] <= -tp_sl,
+                df_sorted["sl_hit"] & ~df_sorted["tp_hit"],
                 "stop_loss",
-                "end_of_holding_period",
+                np.where(
+                    df_sorted["tp_hit"] & df_sorted["sl_hit"],
+                    np.where(
+                        first_tp_index < first_sl_index,
+                        "take_profit",
+                        "stop_loss",
+                    ),
+                    "end_of_holding_period",
+                ),
             ),
         )
 
@@ -134,10 +149,10 @@ def calculate_trade_outcomes(
         return df_sorted[["symbol", "start", "tp_sl_end_long", "final_return_long"]]
 
     if cache.trades_exist(timeframe, trade_params):
-        logging.info(f"Loading cached trades for {trade_params}")
+        # logging.info(f"Loading cached trades for {trade_params}")
         trades_df = cache.load_trades(timeframe, trade_params)
     else:
-        logging.info(f"Computing trades for {trade_params}")
+        # logging.info(f"Computing trades for {trade_params}")
         trades_df = compute_trades()
         cache.save_trades(timeframe, trade_params, trades_df)
 
@@ -160,7 +175,6 @@ def fill_trades_cache(
 ):
     """
     Precomputes and stores trade outcomes for all combinations of parameters.
-    Now includes both raw and absolute return-based trade outcomes.
 
     Args:
         df (pd.DataFrame): Market data with 'symbol', 'start', 'close'.
@@ -175,47 +189,41 @@ def fill_trades_cache(
     """
 
     total_iterations = (
-        len(holding_periods) * len(tp_sl_values) * len(zscore_lookback_values) * 2
-    )  # 2 for use_absolute_returns
+        len(holding_periods) * len(tp_sl_values) * len(zscore_lookback_values)
+    )
 
     with tqdm(total=total_iterations, desc="Filling Trades Cache") as pbar:
         for holding_period in holding_periods:
             for tp_sl in tp_sl_values:
                 for zscore_lookback in zscore_lookback_values:
-                    for use_absolute_returns in [
-                        False,
-                        True,
-                    ]:  # ✅ Now computes both cases
-                        trade_params = {
-                            "holding_period": holding_period,
-                            "tp_sl": tp_sl,
-                            "zscore_lookback": zscore_lookback,
-                            "use_absolute_returns": use_absolute_returns,  # ✅ Added for uniqueness
-                        }
+                    trade_params = {
+                        "holding_period": holding_period,
+                        "tp_sl": tp_sl,
+                        "zscore_lookback": zscore_lookback,
+                    }
 
-                        if cache.trades_exist(timeframe, trade_params):
-                            logging.info(f"Skipping cached trades for {trade_params}")
-                            pbar.update(1)
-                            continue
-
-                        logging.info(f"Computing trades for {trade_params}")
-
-                        # Compute trade outcomes
-                        trade_results = calculate_trade_outcomes(
-                            df=df,
-                            holding_period=holding_period,
-                            tp_sl=tp_sl,
-                            zscore_lookback=zscore_lookback,
-                            cache=cache,
-                            timeframe=timeframe,
-                            use_absolute_returns=use_absolute_returns,  # ✅ Dynamically set
-                        )
-
-                        # Store results in cache
-                        cache.save_trades(timeframe, trade_params, trade_results)
-
-                        del trade_results
+                    if cache.trades_exist(timeframe, trade_params):
+                        logging.info(f"Skipping cached trades for {trade_params}")
                         pbar.update(1)
+                        continue
+
+                    logging.info(f"Computing trades for {trade_params}")
+
+                    # Compute trade outcomes
+                    trade_results = calculate_trade_outcomes(
+                        df=df,
+                        holding_period=holding_period,
+                        tp_sl=tp_sl,
+                        zscore_lookback=zscore_lookback,
+                        cache=cache,
+                        timeframe=timeframe,
+                    )
+
+                    # Store results in cache
+                    cache.save_trades(timeframe, trade_params, trade_results)
+
+                    del trade_results
+                    pbar.update(1)
 
     logging.info("Trade cache fully populated.")
 
