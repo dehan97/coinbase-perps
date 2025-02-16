@@ -310,119 +310,149 @@ def save_strategy_metrics(
 
 
 def run_backtest():
-    # Initialize caches
+    """
+    1. Build all combos for (timeframe, signal_method, (filter_method, filter_params), holding_period, tp_sl, zscore_lookback).
+    2. Shuffle them.
+    3. For each combo, randomly pick one param dict from signal_methods[signal_method], then merge with the combo fields.
+    4. Generate signals/trades/metrics or skip if already exist.
+    5. Save to strategy_mapping.
+    """
+    # Initialize
     signal_cache = SignalCache()
     trade_cache = TradeCache()
     strategy_id = len(strategy_mapping) + 1
 
     try:
+        # 1) Build filter combinations
         filter_combinations = [
             (method, params)
             for method, param_list in Config().filter_methods.items()
             for params in param_list
         ]
 
+        # 2) Build all combos from your enumerations
         total_combinations = list(
             itertools.product(
                 timeframes,
-                signal_methods.keys(),
+                signal_methods.keys(),  # e.g. "prophet_forecast", "exponential_smoothing_forecast", ...
                 filter_combinations,
                 holding_periods,
                 tp_sl_values,
                 zscore_lookback_values,
             )
         )
-        random.shuffle(total_combinations)
 
+        # 3) Shuffle combos
+        random.shuffle(total_combinations)
+        print(f"Total combos after shuffle: {len(total_combinations)}")
+
+        # 4) Loop combos
         for combo in tqdm(
             total_combinations, desc="Backtesting Progress", unit="strategy"
         ):
             (
                 timeframe,
-                signal_method,
+                method_name,
                 (filter_method, filter_params),
-                holding_period,
-                tp_sl,
-                zscore_lookback,
+                combo_holding_period,
+                combo_tp_sl,
+                combo_zscore,
             ) = combo
 
-            for signal_params in signal_methods[signal_method]:
-                strategy_label = f"strategy_{strategy_id}"
-                strategy_config = {
-                    "timeframe": timeframe,
-                    "signal_method": signal_method,
-                    "signal_params": signal_params,
-                    "filter_method": filter_method,
-                    "filter_params": filter_params,
-                    "holding_period": holding_period,
-                    "tp_sl": tp_sl,
-                    "zscore_lookback": zscore_lookback,
-                }
+            # 4A) Grab the entire list of param dicts for this method:
+            # e.g. signal_methods["prophet_forecast"] -> list of many dicts
+            possible_params_list = signal_methods[method_name]
 
-                strategy_dir = f"{Config().results_path}/{strategy_label}"
-                os.makedirs(strategy_dir, exist_ok=True)
-                trades_file = f"{strategy_dir}/trades.parquet"
-                metrics_file = f"{strategy_dir}/metrics.parquet"
+            # 4B) Randomly select exactly 1 param dict from that list
+            # so each iteration picks a random config for, say, prophet or exponential_smoothing
+            if not possible_params_list:
+                print(f"No param list for method={method_name}, skipping.")
+                continue
 
-                # CASE 0) BOTH trades and metrics exist => skip
-                if os.path.exists(trades_file) and os.path.exists(metrics_file):
-                    print(f"Skipping {strategy_label}, trades + metrics already exist.")
-                    strategy_id += 1
-                    continue
+            sparams = random.choice(possible_params_list)
 
-                # CASE 1) trades exist, metrics do not => compute metrics only
-                elif os.path.exists(trades_file) and not os.path.exists(metrics_file):
-                    print(
-                        f"Found trades for {strategy_label} but no metrics. Computing metrics..."
-                    )
-                    metrics = calculate_strategy_metrics(trades_file)
-                    save_strategy_metrics(strategy_dir, strategy_config, metrics)
-                    print(f"Saved metrics for {strategy_label}.")
+            # 4C) Merge the combo fields that must override the dict
+            # e.g. you want the combo's holding_period, tp_sl, zscore_lookback to override sparams
+            # or you can do the reverse if you want sparams to define them.
+            # Here, we assume combo overrides (meaning we trust the combo's holding_period, etc.)
+            new_sparams = sparams.copy()
+            new_sparams["holding_period"] = combo_holding_period
+            new_sparams["tp_sl"] = combo_tp_sl
+            new_sparams["zscore_lookback"] = combo_zscore
 
-                # CASE 2) neither trades nor metrics => generate everything
-                else:
-                    print(
-                        f"No trades nor metrics for {strategy_label}. Generating everything..."
-                    )
+            # 4D) Build the final config for storing
+            strategy_label = f"strategy_{strategy_id}"
+            strategy_config = {
+                "timeframe": timeframe,
+                "signal_method": method_name,
+                "signal_params": new_sparams,  # the merged dictionary
+                "filter_method": filter_method,
+                "filter_params": filter_params,
+                "holding_period": combo_holding_period,
+                "tp_sl": combo_tp_sl,
+                "zscore_lookback": combo_zscore,
+            }
 
-                    # Generate signals
-                    signals = generate_signals(
-                        timeframe=timeframe,
-                        signal_method=signal_method,
-                        signal_params=signal_params,
-                        filter_method=filter_method,
-                        filter_params=filter_params,
-                        cache=signal_cache,
-                    )
+            # 4E) Construct file paths
+            strategy_dir = os.path.join(Config().results_path, strategy_label)
+            os.makedirs(strategy_dir, exist_ok=True)
+            trades_file = os.path.join(strategy_dir, "trades.parquet")
+            metrics_file = os.path.join(strategy_dir, "metrics.parquet")
 
-                    # Create trades
-                    trade_results = calculate_trade_outcomes(
-                        df=signals,
-                        holding_period=holding_period,
-                        tp_sl=tp_sl,
-                        zscore_lookback=zscore_lookback,
-                        cache=trade_cache,
-                        timeframe=timeframe,
-                    )
-
-                    trade_results[trade_results["signal"] != 0].to_parquet(
-                        trades_file, index=False
-                    )
-                    print(f"Saved trades for {strategy_label}.")
-
-                    metrics = calculate_strategy_metrics(trades_file)
-                    save_strategy_metrics(strategy_dir, strategy_config, metrics)
-                    print(f"Saved metrics for {strategy_label}.")
-
-                # Add strategy to mapping and save
-                strategy_mapping[strategy_label] = strategy_config
-                save_strategy_mapping()
-
-                # Increment at end of loop
+            # 5) Skip or generate logic
+            if os.path.exists(trades_file) and os.path.exists(metrics_file):
+                print(f"Skipping {strategy_label}, trades+metrics exist.")
                 strategy_id += 1
+                continue
+            elif os.path.exists(trades_file) and not os.path.exists(metrics_file):
+                print(f"Found trades for {strategy_label}, computing metrics only.")
+                metrics = calculate_strategy_metrics(trades_file)
+                save_strategy_metrics(strategy_dir, strategy_config, metrics)
+                print(f"Saved metrics for {strategy_label}.")
+            else:
+                print(
+                    f"No trades nor metrics for {strategy_label}. Generating signals/trades/metrics..."
+                )
+
+                # 5A) generate_signals with the merged new_sparams
+                signals = generate_signals(
+                    timeframe=timeframe,
+                    signal_method=method_name,
+                    signal_params=new_sparams,
+                    filter_method=filter_method,
+                    filter_params=filter_params,
+                    cache=signal_cache,
+                )
+
+                # 5B) Calculate trade outcomes
+                trade_results = calculate_trade_outcomes(
+                    df=signals,
+                    holding_period=combo_holding_period,
+                    tp_sl=combo_tp_sl,
+                    zscore_lookback=combo_zscore,
+                    cache=trade_cache,
+                    timeframe=timeframe,
+                )
+                # 5C) Save non-zero trades
+                trade_results[trade_results["signal"] != 0].to_parquet(
+                    trades_file, index=False
+                )
+                print(f"Saved trades for {strategy_label} -> {trades_file}")
+
+                # 5D) metrics
+                metrics = calculate_strategy_metrics(trades_file)
+                save_strategy_metrics(strategy_dir, strategy_config, metrics)
+                print(f"Saved metrics for {strategy_label}.")
+
+            # 6) Update mapping
+            strategy_mapping[strategy_label] = strategy_config
+            save_strategy_mapping()
+
+            strategy_id += 1
 
     finally:
         signal_cache.close()
+        trade_cache.close()
         print("Backtesting completed.")
 
 
