@@ -111,9 +111,9 @@ class SignalCache:
         )
 
         if os.path.exists(file_path):
-            logging.info(
-                f"Loading cached filtered signals for {method_name} with {filter_name} ({filter_params})"
-            )
+            # logging.info(
+            #     f"Loading cached filtered signals for {method_name} with {filter_name} ({filter_params})"
+            # )
             return pd.read_parquet(file_path)
 
         # logging.info(
@@ -261,7 +261,7 @@ class FilterCreator:
         df: pd.DataFrame, filter_params: dict, timeframe: str
     ) -> pd.DataFrame:
         """
-        Filters signals based on rolling RSI, categorized into 5 buckets.
+        Filters signals based on rolling RSI, categorized into quantile-based buckets.
         """
         period = filter_params.get("rsi_period", 14)
         bucket_selection = filter_params.get(
@@ -286,19 +286,22 @@ class FilterCreator:
 
         # Compute the number of unique RSI values
         num_unique = df["rsi"].nunique()
+        print(f"{num_unique=}, {df['rsi']=}")
 
         # Ensure we have at least 2 bins, but at most 5 bins
         num_bins = min(5, max(2, num_unique))
 
-        # Adjust the number of labels dynamically to match num_bins - 1
-        df["rsi_bucket"] = pd.qcut(
-            df["rsi"],
-            num_bins,
-            labels=range(
-                1, num_bins
-            ),  # This ensures labels are one fewer than bin edges
-            duplicates="drop",
-        )
+        # Ensure number of labels matches num_bins
+        labels = list(range(1, num_bins + 1))  # Use num_bins labels
+
+        # Adjust qcut parameters dynamically
+        try:
+            df["rsi_bucket"] = pd.qcut(
+                df["rsi"], num_bins, labels=labels, duplicates="drop"
+            )
+        except ValueError as e:
+            print(f"qcut failed: {e}. Defaulting to single-bin category.")
+            df["rsi_bucket"] = 3  # Assign a default category in case of failure
 
         # Convert to categorical before handling NaNs
         df["rsi_bucket"] = df["rsi_bucket"].astype("category")
@@ -362,7 +365,7 @@ def generate_signals(
 
     if filter_method:
         print(f"Applying filter: {filter_method} with params: {filter_params}")
-        filter_creator = FilterCreator(df_signals)
+        # filter_creator = FilterCreator(df_signals)
 
         print("Fetching or creating filtered signals from cache")
         df_filtered = cache.get_or_create_filtered_signals(

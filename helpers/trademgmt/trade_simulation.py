@@ -203,7 +203,7 @@ def fill_trades_cache(
                     }
 
                     if cache.trades_exist(timeframe, trade_params):
-                        logging.info(f"Skipping cached trades for {trade_params}")
+                        # logging.info(f"Skipping cached trades for {trade_params}")
                         pbar.update(1)
                         continue
 

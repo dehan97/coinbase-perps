@@ -23,16 +23,6 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# # Setup logging
-# logging.basicConfig(
-#     filename=f"{Config().logs_path}/backtest.log",
-#     level=logging.INFO,
-#     format=Config().logging_format,
-# )
-# logging.getLogger("cmdstanpy").disabled = True
-# print(f"Logging Path: {Config().logs_path}")
-
-
 # Configuration for backtesting
 timeframes = Config().time_intervals
 signal_methods = Config().signal_methods
@@ -75,198 +65,218 @@ def max_dd(returns):
     return mdd, start, end
 
 
-def calculate_strategy_metrics(trades_file: str):
-    """Calculates extensive strategy performance metrics per symbol and overall, incorporating trade costs."""
+def calculate_strategy_metrics(trades_file: str) -> pd.DataFrame:
+    """
+    Calculates extensive strategy performance metrics per symbol and overall, incorporating trade costs.
+    If no trades or daily returns are found, returns an empty DataFrame (rather than None).
+    """
     trades = pd.read_parquet(trades_file)
-
     if trades.empty:
-        return None
+        print(f"No trades found in {trades_file}, skipping metrics.")
+        # Return an empty DataFrame with appropriate columns (optional)
+        return pd.DataFrame()
 
-    # Compute trade returns based on signal
+    # 1) Compute trade returns (including cost)
     trades["trade_return"] = trades["signal"] * trades["final_return_long"]
 
-    # Apply trade costs: 0.7% per trade (one-way)
-    trade_costs = (
-        2 * Config().one_way_trade_costs
-    )  # Absolute trade size to account for both buy/sell trades
-    trades["trade_return"] -= trade_costs  # Deducting cost from returns
+    # Apply 2 * one-way costs to each position
+    trade_costs = 2 * Config().one_way_trade_costs
+    trades["trade_return"] -= trade_costs
 
-    # Drop NaN values
+    # Drop any leftover NaNs
     trades.dropna(subset=["trade_return"], inplace=True)
 
-    # Calculate daily returns per symbol
+    # 2) Create subsets for long/short/recent
+    long_trades = trades[trades["signal"] == 1]
+    short_trades = trades[trades["signal"] == -1]
+    recent_trades = trades[
+        trades["start"]
+        >= (pd.to_datetime(Config().end_date_range) - pd.DateOffset(years=1))
+    ]
+
+    # 3) Aggregate daily returns by symbol
     daily_returns = (
         trades.groupby(["start", "symbol"], observed=False)["trade_return"]
         .sum()
         .unstack(fill_value=0)
     )
+    buy_daily_returns = (
+        long_trades.groupby(["start", "symbol"])["trade_return"]
+        .sum()
+        .unstack(fill_value=0)
+    )
+    sell_daily_returns = (
+        short_trades.groupby(["start", "symbol"])["trade_return"]
+        .sum()
+        .unstack(fill_value=0)
+    )
+    recent_daily_returns = (
+        recent_trades.groupby(["start", "symbol"])["trade_return"]
+        .sum()
+        .unstack(fill_value=0)
+    )
 
-    # Calculate equal-weighted strategy daily returns (1/n allocation)
-    daily_returns["ALL"] = daily_returns.mean(axis=1)
+    # If no daily returns at all, skip
+    if daily_returns.empty:
+        print(f"No daily returns from {trades_file}, skipping metrics.")
+        return pd.DataFrame()
 
-    # Filter data to the last year for recent performance metrics
-    recent_returns = daily_returns[
-        daily_returns.index >= (pd.to_datetime("today") - pd.DateOffset(years=1))
-    ]
-
-    def compute_metrics(returns, symbol):
-        """Helper function to compute extensive strategy metrics."""
-        num_days = len(returns)
-        annual_factor = 252  # Number of trading days in a year
-
-        # Categorize returns into positive, negative, and no return
-        positive_returns = returns[returns > 0]
-        negative_returns = returns[returns < 0]
-
-        def aggregate_metrics(subset_returns, category):
-            """Computes all relevant metrics for a specific subset of trades (overall, positive, negative, recent)."""
-            if isinstance(
-                subset_returns, pd.DataFrame
-            ):  # If multiple columns exist, take the mean across columns
-                subset_returns = subset_returns.mean(axis=1)
-
-            if subset_returns.empty:
-                return {
-                    f"{category} Sharpe Ratio": None,
-                    f"{category} Sortino Ratio": None,
-                    f"{category} Win Rate": None,
-                    f"{category} Avg Trade Return": None,
-                    f"{category} Total Return": None,
-                    f"{category} Annualized Return": None,
-                    f"{category} Volatility": None,
-                    f"{category} Max Drawdown": None,
-                    f"{category} Calmar Ratio": None,
-                    f"{category} Profit Factor": None,
-                    f"{category} Expectancy": None,
-                }
-
-            std_dev = subset_returns.std()
-            std_dev = float(
-                np.nan_to_num(std_dev, nan=1e-10, posinf=1e10, neginf=-1e10)
-            )
-
-            if std_dev <= 1e-10:  # Avoid division by zero
-                sharpe_ratio = 0  # Set Sharpe Ratio to 0 if volatility is negligible
-            else:
-                sharpe_ratio = subset_returns.mean() / std_dev * (annual_factor**0.5)
-
-            downside_returns = subset_returns[subset_returns < 0]
-            sortino_ratio = (
-                subset_returns.mean() / downside_returns.std() * (annual_factor**0.5)
-                if not downside_returns.empty and downside_returns.std() != 0
-                else 0.0
-            )
-
-            # 1️⃣ Replace infinities with NaN, then fill NaNs with 0
-            subset_returns = subset_returns.replace([np.inf, -np.inf], np.nan).fillna(0)
-
-            # 2️⃣ Clip extreme values to prevent log1p issues
-            subset_returns = np.clip(
-                subset_returns, -0.99, 1e6
-            )  # ✅ Ensures valid log1p range
-
-            # 3️⃣ Apply log1p safely
-            log_sum = np.log1p(subset_returns).sum()
-
-            # 4️⃣ Prevent extreme log_sum values before exponentiation
-            log_sum = np.clip(log_sum, -700, 50)  # ✅ Avoids np.exp() overflow
-
-            # 5️⃣ Use numerically stable exponentiation
-            total_return = np.expm1(log_sum)  # ✅ Handles small values more accurately
-
-            annualized_return = (
-                (1 + total_return) ** (annual_factor / num_days) - 1
-                if num_days > 0
-                else None
-            )
-            volatility = (
-                np.nan_to_num(subset_returns.std(), nan=0, posinf=1e10, neginf=-1e10)
-                * (annual_factor**0.5)
-                if not subset_returns.empty
-                else None
-            )
-
-            mdd, _, _ = max_dd(subset_returns)
-            calmar_ratio = annualized_return / abs(mdd) if mdd != 0 else None
-            profit_factor = (
-                (
-                    subset_returns[subset_returns > 0].sum()
-                    / abs(subset_returns[subset_returns < 0].sum())
-                )
-                if subset_returns[subset_returns < 0].sum() != 0
-                else None
-            )
-            expectancy = subset_returns.mean()
-
+    # 4) Helper to compute sub-metrics for each category
+    def aggregate_metrics(subset_returns: pd.Series, category: str) -> dict:
+        """Generic aggregator for one subset (Overall / Long / Short / Recent)."""
+        if subset_returns.empty:
             return {
-                f"{category} Sharpe Ratio": sharpe_ratio,
-                f"{category} Sortino Ratio": sortino_ratio,
-                f"{category} Win Rate": (
-                    (subset_returns > 0).sum() / len(subset_returns)
-                    if len(subset_returns) > 0
-                    else None
-                ),
-                f"{category} Avg Trade Return": subset_returns.mean(),
-                f"{category} Total Return": total_return,
-                f"{category} Annualized Return": annualized_return,
-                f"{category} Volatility": volatility,
-                f"{category} Max Drawdown": mdd,
-                f"{category} Calmar Ratio": calmar_ratio,
-                f"{category} Profit Factor": profit_factor,
-                f"{category} Expectancy": expectancy,
+                f"{category} Sharpe Ratio": None,
+                f"{category} Sortino Ratio": None,
+                f"{category} Win Rate": None,
+                f"{category} Avg Trade Return": None,
+                f"{category} Total Return": None,
+                f"{category} Annualized Return": None,
+                f"{category} Volatility": None,
+                f"{category} Max Drawdown": None,
+                f"{category} Calmar Ratio": None,
+                f"{category} Profit Factor": None,
+                f"{category} Expectancy": None,
             }
 
-        # Aggregate metrics for each category
-        overall_metrics = aggregate_metrics(returns, "Overall")
-        positive_metrics = aggregate_metrics(positive_returns, "Positive")
-        negative_metrics = aggregate_metrics(negative_returns, "Negative")
-        recent_metrics = aggregate_metrics(recent_returns, "Recent")
+        annual_factor = 252
+        std_dev = float(np.nan_to_num(subset_returns.std(), nan=1e-10))
+        mean_return = subset_returns.mean()
+
+        # Sharpe
+        sharpe_ratio = (
+            0.0 if std_dev <= 1e-10 else mean_return / std_dev * (annual_factor**0.5)
+        )
+
+        # Sortino
+        downside = subset_returns[subset_returns < 0]
+        if not downside.empty and downside.std() != 0:
+            sortino_ratio = mean_return / downside.std() * (annual_factor**0.5)
+        else:
+            sortino_ratio = 0.0
+
+        # Clean infinite / NaNs
+        subset_returns = subset_returns.replace([np.inf, -np.inf], np.nan).fillna(0)
+        subset_returns = np.clip(subset_returns, -0.99, 1e6)
+
+        # Total return via log1p
+        log_sum = np.log1p(subset_returns).sum()
+        log_sum = np.clip(log_sum, -700, 50)
+        total_return = np.expm1(log_sum)
+
+        # Annualized return
+        n_days = len(subset_returns)
+        annualized_return = None
+        if n_days > 0:
+            annualized_return = (1.0 + total_return) ** (annual_factor / n_days) - 1.0
+
+        volatility = None
+        if not subset_returns.empty:
+            volatility = subset_returns.std() * (annual_factor**0.5)
+
+        # Max Drawdown
+        mdd, _, _ = max_dd(subset_returns)
+        calmar_ratio = (
+            annualized_return / abs(mdd) if (mdd != 0 and annualized_return) else None
+        )
+
+        # Profit Factor
+        neg_sum = subset_returns[subset_returns < 0].sum()
+        pf = None
+        if neg_sum != 0:
+            pf = subset_returns[subset_returns > 0].sum() / abs(neg_sum)
+
+        # Expectancy
+        expectancy = mean_return
+
+        # Win Rate
+        win_rate = None
+        if len(subset_returns) > 0:
+            win_rate = (subset_returns > 0).sum() / len(subset_returns)
+
+        return {
+            f"{category} Sharpe Ratio": sharpe_ratio,
+            f"{category} Sortino Ratio": sortino_ratio,
+            f"{category} Win Rate": win_rate,
+            f"{category} Avg Trade Return": mean_return,
+            f"{category} Total Return": total_return,
+            f"{category} Annualized Return": annualized_return,
+            f"{category} Volatility": volatility,
+            f"{category} Max Drawdown": mdd,
+            f"{category} Calmar Ratio": calmar_ratio,
+            f"{category} Profit Factor": pf,
+            f"{category} Expectancy": expectancy,
+        }
+
+    def compute_symbol_metrics(symbol: str) -> dict:
+        """
+        For a single symbol, compute Overall/Long/Short/Recent.
+        """
+        overall_series = daily_returns[symbol]
+        long_series = buy_daily_returns.get(symbol, pd.Series(dtype=float))
+        short_series = sell_daily_returns.get(symbol, pd.Series(dtype=float))
+        recent_series = recent_daily_returns.get(symbol, pd.Series(dtype=float))
+
+        # Overall, Long, Short, Recent
+        overall = aggregate_metrics(overall_series, "Overall")
+        long_met = aggregate_metrics(long_series, "Long")
+        short_met = aggregate_metrics(short_series, "Short")
+        recent_met = aggregate_metrics(recent_series, "Recent")
 
         # Additional execution-based metrics
-        num_trades = trades[trades["symbol"] == symbol]["signal"].ne(0).sum()
-        turnover = trades[trades["symbol"] == symbol]["signal"].diff().abs().sum()
+        symbol_trades = trades[trades["symbol"] == symbol]
+        num_days = len(overall_series)
+
+        num_trades = symbol_trades["signal"].ne(0).sum()
+        num_long_trades = symbol_trades[symbol_trades["signal"] == 1]["signal"].count()
+        num_short_trades = symbol_trades[symbol_trades["signal"] == -1][
+            "signal"
+        ].count()
+        turnover = symbol_trades["signal"].diff().abs().sum()
         exposure_time = num_trades / num_days if num_days > 0 else None
 
-        # Consecutive Wins & Losses
+        # consecutive wins/losses
         win_streaks = (
-            (returns > 0).astype(int).groupby((returns <= 0).astype(int).cumsum()).sum()
+            (overall_series > 0)
+            .astype(int)
+            .groupby((overall_series <= 0).astype(int).cumsum())
+            .sum()
         )
         loss_streaks = (
-            (returns < 0).astype(int).groupby((returns >= 0).astype(int).cumsum()).sum()
+            (overall_series < 0)
+            .astype(int)
+            .groupby((overall_series >= 0).astype(int).cumsum())
+            .sum()
         )
 
         max_consec_wins = win_streaks.max() if not win_streaks.empty else 0
         max_consec_losses = loss_streaks.max() if not loss_streaks.empty else 0
 
-        return {
+        # Merge all metrics
+        result = {
             "Symbol": symbol,
-            **overall_metrics,
-            **positive_metrics,
-            **negative_metrics,
-            **recent_metrics,
-            "Number of Trades": num_trades,
+            **overall,
+            **long_met,
+            **short_met,
+            **recent_met,
+            "Num Trades": num_trades,
+            "Num Long Trades": num_long_trades,
+            "Num Short Trades": num_short_trades,
             "Turnover": turnover,
             "Exposure Time": exposure_time,
             "Max Consecutive Wins": max_consec_wins,
             "Max Consecutive Losses": max_consec_losses,
         }
+        return result
 
-    # Compute metrics for each symbol including 'ALL'
+    # 5) Build a list of metrics for each symbol
     symbol_metrics = []
     for symbol in daily_returns.columns:
-        # Compute overall metrics using the full data set
-        metrics = compute_metrics(daily_returns[symbol], symbol)
+        symbol_metrics.append(compute_symbol_metrics(symbol))
 
-        # Compute recent metrics using the filtered data set from the last year
-        recent_metrics = compute_metrics(recent_returns[symbol], symbol)
-
-        # Merge overall and recent metrics
-        metrics.update(
-            recent_metrics
-        )  # Ensure recent metrics are properly labeled to distinguish them
-
-        symbol_metrics.append(metrics)
-
+    # 6) Return a DataFrame
+    if not symbol_metrics:
+        return pd.DataFrame()
     return pd.DataFrame(symbol_metrics)
 
 
@@ -286,7 +296,9 @@ def save_strategy_metrics(
     signal_params = strategy_config_flat.pop("signal_params", {})
     filter_params = strategy_config_flat.pop("filter_params", {})
 
-    strategy_config_flat["Signal Parameters"] = [signal_params] * len(metrics_df)
+    strategy_config_flat["Signal Parameters"] = [signal_params] * len(
+        metrics_df
+    )  # NOTE THIS IS PROBABLY THE ISSUE RIGHT?
     strategy_config_flat["Filter Parameters"] = [filter_params] * len(metrics_df)
 
     # Merge strategy config with metrics
@@ -301,8 +313,7 @@ def run_backtest():
     # Initialize caches
     signal_cache = SignalCache()
     trade_cache = TradeCache()
-
-    strategy_id = len(strategy_mapping) + 1  # Start from the next strategy
+    strategy_id = len(strategy_mapping) + 1
 
     try:
         filter_combinations = [
@@ -311,7 +322,6 @@ def run_backtest():
             for params in param_list
         ]
 
-        # Iterate over all possible backtesting configurations
         total_combinations = list(
             itertools.product(
                 timeframes,
@@ -322,11 +332,9 @@ def run_backtest():
                 zscore_lookback_values,
             )
         )
-
         random.shuffle(total_combinations)
 
-        # Iterate over all combinations with progress bar
-        for combination in tqdm(
+        for combo in tqdm(
             total_combinations, desc="Backtesting Progress", unit="strategy"
         ):
             (
@@ -336,10 +344,9 @@ def run_backtest():
                 holding_period,
                 tp_sl,
                 zscore_lookback,
-            ) = combination
+            ) = combo
 
             for signal_params in signal_methods[signal_method]:
-                # Create a unique identifier for the strategy
                 strategy_label = f"strategy_{strategy_id}"
                 strategy_config = {
                     "timeframe": timeframe,
@@ -352,141 +359,75 @@ def run_backtest():
                     "zscore_lookback": zscore_lookback,
                 }
 
-                # Define strategy directory and file paths
                 strategy_dir = f"{Config().results_path}/{strategy_label}"
+                os.makedirs(strategy_dir, exist_ok=True)
                 trades_file = f"{strategy_dir}/trades.parquet"
                 metrics_file = f"{strategy_dir}/metrics.parquet"
 
-                # Skip processing if results already exist
-                if os.path.exists(trades_file):
-                    # logging.info(f"Skipping {strategy_label}, results already exist.")
-                    print(f"Skipping {strategy_label}, results already exist.")
-
-                    # Compute and save metrics if not already done
-                    if not os.path.exists(metrics_file):
-                        metrics = calculate_strategy_metrics(trades_file)
-                        save_strategy_metrics(strategy_dir, strategy_config, metrics)
-                        print(f"Saved metrics for {strategy_label}.")
-                    else:
-                        print(f"Metrics for {strategy_label} already exist.")
-
+                # CASE 0) BOTH trades and metrics exist => skip
+                if os.path.exists(trades_file) and os.path.exists(metrics_file):
+                    print(f"Skipping {strategy_label}, trades + metrics already exist.")
                     strategy_id += 1
                     continue
 
-                # logging.info(f"Starting {strategy_label}: {strategy_config}")
-                print(f"Processing {strategy_label}: {strategy_config}")
+                # CASE 1) trades exist, metrics do not => compute metrics only
+                elif os.path.exists(trades_file) and not os.path.exists(metrics_file):
+                    print(
+                        f"Found trades for {strategy_label} but no metrics. Computing metrics..."
+                    )
+                    metrics = calculate_strategy_metrics(trades_file)
+                    save_strategy_metrics(strategy_dir, strategy_config, metrics)
+                    print(f"Saved metrics for {strategy_label}.")
 
-                # Generate signals
-                signals = generate_signals(
-                    timeframe=timeframe,
-                    signal_method=signal_method,
-                    signal_params=signal_params,
-                    filter_method=filter_method,
-                    filter_params=filter_params,
-                    cache=signal_cache,
-                )
-                # logging.info(f"{strategy_label}: Generated {len(signals)} signals.")
-                print(f"{strategy_label}: {len(signals)} signals generated.")
-                # print(signals["signal"].value_counts()) #signals contains the actionable signals only.
+                # CASE 2) neither trades nor metrics => generate everything
+                else:
+                    print(
+                        f"No trades nor metrics for {strategy_label}. Generating everything..."
+                    )
 
-                # print(f"{signals.shape}")
-                # print("Null values before merge:")
-                # print(signals.isnull().sum())
+                    # Generate signals
+                    signals = generate_signals(
+                        timeframe=timeframe,
+                        signal_method=signal_method,
+                        signal_params=signal_params,
+                        filter_method=filter_method,
+                        filter_params=filter_params,
+                        cache=signal_cache,
+                    )
 
-                # Merge with price data to get back all rows.
-                signals = signals[["symbol", "start", "signal"]].merge(
-                    load_data_for_timeframe(timeframe).reset_index()[
-                        ["symbol", "start", "close", "returns", "volume"]
-                    ],
-                    how="right",
-                    on=["symbol", "start"],
-                )
+                    # Create trades
+                    trade_results = calculate_trade_outcomes(
+                        df=signals,
+                        holding_period=holding_period,
+                        tp_sl=tp_sl,
+                        zscore_lookback=zscore_lookback,
+                        cache=trade_cache,
+                        timeframe=timeframe,
+                    )
 
-                # print(f"{signals.shape}")
-                # print("Null values after merge:")
-                # print(signals.isnull().sum())
+                    trade_results[trade_results["signal"] != 0].to_parquet(
+                        trades_file, index=False
+                    )
+                    print(f"Saved trades for {strategy_label}.")
 
-                # Fill missing signals and returns with 0
-                signals["signal"] = signals["signal"].fillna(0)
-                signals["returns"] = signals["returns"].fillna(0)
-
-                # print(f"{signals.columns=}")
-                # Calculate trade outcomes
-                trade_results = calculate_trade_outcomes(
-                    df=signals,
-                    holding_period=holding_period,
-                    tp_sl=tp_sl,
-                    zscore_lookback=zscore_lookback,
-                    cache=trade_cache,
-                    timeframe=timeframe,
-                )
-
-                # logging.info(
-                #     f"{strategy_label}: Calculated outcomes for {len(trade_results)} trades."
-                # )
-                print(
-                    f"{strategy_label}: Outcomes calculated for {len(trade_results)} trades."
-                )
-                print(f"{trade_results['signal'].value_counts()=}")
-
-                # Create strategy directory
-                os.makedirs(strategy_dir, exist_ok=True)
-
-                # Save trade results
-                trade_results[trade_results["signal"] != 0].to_parquet(
-                    trades_file, index=False
-                )
-
-                # logging.info(f"{strategy_label}: Saved results to {trades_file}.")
-                print(f"Results for {strategy_label} saved to {trades_file}")
-
-                # Compute and save strategy metrics
-                metrics = calculate_strategy_metrics(trades_file)
-                save_strategy_metrics(strategy_dir, strategy_config, metrics)
-                print(f"Saved metrics for {strategy_label}.")
+                    metrics = calculate_strategy_metrics(trades_file)
+                    save_strategy_metrics(strategy_dir, strategy_config, metrics)
+                    print(f"Saved metrics for {strategy_label}.")
 
                 # Add strategy to mapping and save
                 strategy_mapping[strategy_label] = strategy_config
                 save_strategy_mapping()
 
+                # Increment at end of loop
                 strategy_id += 1
+
     finally:
-        # Close caches
         signal_cache.close()
-        # logging.info("Caches closed. Backtesting completed.")
         print("Backtesting completed.")
 
 
 if __name__ == "__main__":
-    # # RUN CACHE FILL
-    # # Initialize caches
-    # trade_cache = TradeCache()
-    # signal_cache = SignalCache()
-
-    # # Define parameter ranges
-    # holding_periods = Config().holding_periods
-    # tp_sl_values = Config().tp_sl_values
-    # zscore_lookback_values = Config().zscore_lookback_values
-
-    # for timeframe in Config().time_intervals:
-    #     # Load market data
-    #     df_prices = load_data_for_timeframe(timeframe).reset_index()[
-    #         ["symbol", "start", "close", "returns"]
-    #     ]
-
-    #     # Precompute & store all trade results
-    #     fill_trades_cache(
-    #         df=df_prices,
-    #         timeframe=timeframe,
-    #         holding_periods=holding_periods,
-    #         tp_sl_values=tp_sl_values,
-    #         zscore_lookback_values=zscore_lookback_values,
-    #         cache=trade_cache,
-    #     )
-
-    # print("Trade cache is now fully populated!")
-
-    # RUN BACKTESTING
+    ### RUN BACKTESTING
     print("Starting backtesting process...")
     # logging.info("Backtesting process initiated.")
     run_backtest()
