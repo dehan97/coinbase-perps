@@ -101,7 +101,7 @@ class TimeSeriesForecastingMixin:
             ):
                 train_data = symbol_data["returns"].iloc[i - training_window : i]
                 try:
-                    model = ARIMA(train_data, order=(p, d, q))  # NOTE try SARIMA
+                    model = ARIMA(train_data, order=(p, d, q))
                     fitted_model = model.fit(method="statespace")
                     forecast = fitted_model.forecast(steps=holding_period)
                     symbol_data.iloc[
@@ -115,16 +115,8 @@ class TimeSeriesForecastingMixin:
             symbol_data.loc[symbol_data["forecast"] > 0, "signal"] = 1
             symbol_data.loc[symbol_data["forecast"] < 0, "signal"] = -1
 
-            print(f"{symbol_data['forecast'].value_counts()=}")
+            # print(f"{symbol_data['forecast'].value_counts()=}")
             print(f"{symbol_data['signal'].value_counts()=}")
-
-            # If all signals are 0 for this symbol, return a DataFrame with all signals set to 0
-            # if (
-            #     symbol_data["signal"].nunique() == 1
-            #     and symbol_data["signal"].unique()[0] == 0
-            # ):
-            #     df["signal"] = 0
-            #     return df.reset_index()[["symbol", "start", "signal"]]
 
             df.loc[df.index.get_level_values("symbol") == symbol, "signal"] = (
                 symbol_data["signal"].values
@@ -206,16 +198,8 @@ class TimeSeriesForecastingMixin:
                 symbol_data["signal"].values
             )
 
-            print(f"{symbol_data['forecast'].value_counts()=}")
+            # print(f"{symbol_data['forecast'].value_counts()=}")
             print(f"{symbol_data['signal'].value_counts()=}")
-
-            # # If all signals are 0 for this symbol, return a DataFrame with all signals set to 0
-            # if (
-            #     symbol_data["signal"].nunique() == 1
-            #     and symbol_data["signal"].unique()[0] == 0
-            # ):
-            #     df["signal"] = 0
-            #     return df.reset_index()[["symbol", "start", "signal"]]
 
         return df.reset_index()[["symbol", "start", "signal"]]
 
@@ -288,16 +272,8 @@ class TimeSeriesForecastingMixin:
             symbol_data.loc[symbol_data["forecast"] > 0, "signal"] = 1
             symbol_data.loc[symbol_data["forecast"] < 0, "signal"] = -1
 
-            print(f"{symbol_data['forecast'].value_counts()=}")
+            # print(f"{symbol_data['forecast'].value_counts()=}")
             print(f"{symbol_data['signal'].value_counts()=}")
-
-            # If all signals are 0 for this symbol, return a DataFrame with all signals set to 0
-            # if (
-            #     symbol_data["signal"].nunique() == 1
-            #     and symbol_data["signal"].unique()[0] == 0
-            # ):
-            #     df["signal"] = 0
-            #     return df.reset_index()[["symbol", "start", "signal"]]
 
             df.loc[df.index.get_level_values("symbol") == symbol, "signal"] = (
                 symbol_data["signal"].values
@@ -378,16 +354,8 @@ class TimeSeriesForecastingMixin:
             # Update the main dataframe with the calculated signals and forecasts
             df.loc[df["symbol"] == symbol, "signal"] = symbol_data["signal"].values
 
-            print(f"{symbol_data['forecast'].value_counts()=}")
+            # print(f"{symbol_data['forecast'].value_counts()=}")
             print(f"{symbol_data['signal'].value_counts()=}")
-
-            # If all signals are 0 for this symbol, return a DataFrame with all signals set to 0
-            # if (
-            #     symbol_data["signal"].nunique() == 1
-            #     and symbol_data["signal"].unique()[0] == 0
-            # ):
-            #     df["signal"] = 0
-            #     return df.reset_index()[["symbol", "start", "signal"]]
 
         # Return only the required columns
         return (

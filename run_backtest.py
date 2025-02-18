@@ -371,6 +371,12 @@ def run_backtest():
 
             sparams = random.choice(possible_params_list)
 
+            # Force exactly ONE of {apply_log, apply_boxcox, apply_detrend} to True, others False
+            transformations = ["apply_log", "apply_boxcox", "apply_detrend"]
+            chosen_one = random.choice(transformations)
+            for trans in transformations:
+                sparams[trans] = trans == chosen_one
+
             # 4C) Merge the combo fields that must override the dict
             # e.g. you want the combo's holding_period, tp_sl, zscore_lookback to override sparams
             # or you can do the reverse if you want sparams to define them.

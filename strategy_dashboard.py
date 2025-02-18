@@ -85,7 +85,7 @@ symbols = sorted(df_trades["symbol"].unique())
 app.layout = html.Div(
     [
         html.H1("Strategy Performance Dashboard", style={"marginBottom": 10}),
-        # Filters
+        # Top Section (Filters + Metrics)
         html.Div(
             [
                 html.Div(
@@ -123,8 +123,37 @@ app.layout = html.Div(
         dcc.Graph(id="pnl-chart"),
         dcc.Graph(id="drawdown-chart"),
         # Metrics Table
+        html.H2("Overall Metrics"),
         dash_table.DataTable(
-            id="metrics-table",
+            id="overall-table",
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "left"},
+        ),
+        html.H2("Recent Metrics"),
+        dash_table.DataTable(
+            id="recent-table",
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "left"},
+        ),
+        html.H2("Long Metrics"),
+        dash_table.DataTable(
+            id="long-table",
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "left"},
+        ),
+        html.H2("Short Metrics"),
+        dash_table.DataTable(
+            id="short-table",
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "left"},
+        ),
+        html.H2("Other Metrics"),
+        dash_table.DataTable(
+            id="other-table",
             page_size=10,
             style_table={"overflowX": "auto"},
             style_cell={"textAlign": "left"},
@@ -137,20 +166,23 @@ app.layout = html.Div(
 ##########################
 # Callbacks
 ##########################
-
-
 @app.callback(
     [
         Output("price-chart", "figure"),
         Output("pnl-chart", "figure"),
         Output("drawdown-chart", "figure"),
-        Output("metrics-table", "data"),
-        Output("metrics-table", "columns"),
+        Output("overall-table", "data"),
+        Output("overall-table", "columns"),
+        Output("recent-table", "data"),
+        Output("recent-table", "columns"),
+        Output("long-table", "data"),
+        Output("long-table", "columns"),
+        Output("short-table", "data"),
+        Output("short-table", "columns"),
+        Output("other-table", "data"),
+        Output("other-table", "columns"),
     ],
-    [
-        Input("strategy-dropdown", "value"),
-        Input("symbol-dropdown", "value"),
-    ],
+    [Input("strategy-dropdown", "value"), Input("symbol-dropdown", "value")],
 )
 def update_charts(strategy_number, symbol):
     """
@@ -163,7 +195,10 @@ def update_charts(strategy_number, symbol):
     """
 
     # Filter metrics
-    filtered_metrics = df_metrics[(df_metrics["strategy_number"] == strategy_number)]
+    filtered_metrics = df_metrics[
+        (df_metrics["strategy_number"] == strategy_number)
+        & (df_metrics["Symbol"] == symbol)
+    ]
     # Filter trades
     filtered_trades = df_trades[
         (df_trades["strategy_number"] == strategy_number)
@@ -283,12 +318,64 @@ def update_charts(strategy_number, symbol):
     show_metrics = filtered_metrics.loc[
         (filtered_metrics["Symbol"] == symbol)
         & (filtered_metrics["strategy_number"] == strategy_number)
-    ]
-    # Convert data to dict
-    data_table = show_metrics.to_dict("records")
-    columns_table = [{"name": col, "id": col} for col in show_metrics.columns]
+    ].copy()
 
-    return fig_price, fig_pnl, fig_drawdown, data_table, columns_table
+    # Convert dictionary columns to strings
+    for col in ["Signal Parameters", "Filter Parameters"]:
+        if col in filtered_metrics.columns:
+            filtered_metrics[col] = filtered_metrics[col].apply(
+                lambda x: str(x) if isinstance(x, (dict, list)) else x
+            )
+
+    # Round numerical columns to 3 significant figures
+    for col in filtered_metrics.select_dtypes(include=[np.number]).columns:
+        filtered_metrics[col] = filtered_metrics[col].apply(lambda x: round(x, 3))
+
+    # Ensure all values are either string, number, or boolean
+    for col in filtered_metrics.columns:
+        filtered_metrics[col] = filtered_metrics[col].apply(
+            lambda x: (
+                str(x) if not isinstance(x, (str, int, float, bool, type(None))) else x
+            )
+        )
+
+    # Group columns
+    groups = {
+        "Overall": [col for col in filtered_metrics.columns if "Overall" in col],
+        "Recent": [col for col in filtered_metrics.columns if "Recent" in col],
+        "Long": [col for col in filtered_metrics.columns if "Long" in col],
+        "Short": [col for col in filtered_metrics.columns if "Short" in col],
+    }
+
+    used_columns = sum(groups.values(), [])
+    groups["Others"] = [
+        col for col in filtered_metrics.columns if col not in used_columns
+    ]
+
+    # Ensure each table has the Symbol column for reference
+    data_dict = {}
+    for group_name, cols in groups.items():
+        data_dict[group_name] = (
+            filtered_metrics[["Symbol"] + cols].to_dict("records") if cols else []
+        )
+        data_dict[f"{group_name}_columns"] = (
+            [{"name": col, "id": col} for col in ["Symbol"] + cols] if cols else []
+        )
+
+    # If a table group is empty, return default values
+    def get_table_data(group):
+        return (data_dict.get(group, []), data_dict.get(f"{group}_columns", []))
+
+    return (
+        fig_price,
+        fig_pnl,
+        fig_drawdown,  # Graphs
+        *get_table_data("Overall"),
+        *get_table_data("Recent"),
+        *get_table_data("Long"),
+        *get_table_data("Short"),
+        *get_table_data("Others"),
+    )
 
 
 ##########################
@@ -301,7 +388,7 @@ def open_browser():
 
 if __name__ == "__main__":
     # Start a timer that opens the browser after a short delay
-    threading.Timer(1.0, open_browser).start()
+    # threading.Timer(1.0, open_browser).start()
 
     # Now run the server (on localhost:8050 by default)
     app.run_server(debug=True, host="127.0.0.1", port=8050)
