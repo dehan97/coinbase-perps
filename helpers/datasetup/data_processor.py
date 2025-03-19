@@ -152,19 +152,24 @@ class MarketDataProcessor:
 
         # **🔹 Forward-Fill, Backward-Fill, and Fill NaN**
         resampled["volume"] = resampled["volume"].fillna(0)
+        resampled.reset_index(
+            inplace=True, drop=False
+        )  # Reset and keep the current index as a column if needed
         resampled = resampled.groupby("symbol").apply(lambda g: g.ffill().bfill())
 
         print("Missing Values After Fill:")
         print(resampled.isna().sum())
 
         # Save to parquet
+        # print(f"{resampled.columns=}")
+        resampled.reset_index(inplace=True, drop=True)
         resampled.to_parquet(resampled_path, partition_cols=["symbol"])
         logging.info(f"Saved resampled data to {resampled_path}.")
 
         print("Final Resampled Data Sample:")
         print(resampled.head(10))
 
-        return resampled.reset_index()
+        return resampled
 
 
 @lru_cache(maxsize=None)

@@ -388,7 +388,7 @@ def open_browser():
 
 if __name__ == "__main__":
     # Start a timer that opens the browser after a short delay
-    # threading.Timer(1.0, open_browser).start()
+    threading.Timer(1.0, open_browser).start()
 
     # Now run the server (on localhost:8050 by default)
     app.run_server(debug=True, host="127.0.0.1", port=8050)

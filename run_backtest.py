@@ -457,8 +457,8 @@ def run_backtest():
             strategy_id += 1
 
     finally:
-        signal_cache.close()
-        trade_cache.close()
+        # signal_cache.close()
+        # trade_cache.close()
         print("Backtesting completed.")
 
 
